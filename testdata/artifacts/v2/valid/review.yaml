@@ -24,6 +24,8 @@ steps:
     title: Understand activation rules
     priority: high
     rationale: The model defines when an account may become active.
+    review_question: Does the activation rule preserve the intended account lifecycle?
+    attention: [design, behavior]
     files:
       - app/models/account.rb
     blocks:
@@ -52,6 +54,9 @@ steps:
       - id: activation-question
         type: question
         body: Should suspended accounts ever be reactivated automatically?
+      - id: activation-takeaway
+        type: takeaway
+        body: The activation predicate remains the single owner of the transition rule.
   - id: presentation
     title: Follow the result into the account page
     priority: low
@@ -66,6 +71,7 @@ steps:
         type: diff
         path: app/views/accounts/show.html.erb
         view: unified
+        collapsed: true
       - id: activation-flow
         type: diagram
         path: diagrams/activation-flow.mmd

@@ -29,6 +29,13 @@ type Stored struct {
 	Path   string
 }
 
+// BlockLocation identifies one globally addressable block and its containing chapter.
+type BlockLocation struct {
+	Stored    *Stored
+	StepIndex int
+	Block     artifact.Block
+}
+
 // NotFoundError reports an absent review or review asset.
 type NotFoundError struct{ Message string }
 
@@ -106,6 +113,22 @@ func (s *Store) Find(id string) (*Stored, error) {
 		return nil, err
 	}
 	return &Stored{Review: parsed, Path: realPath}, nil
+}
+
+// FindBlock resolves a stable review and block ID to its persisted chapter context.
+func (s *Store) FindBlock(reviewID, blockID string) (*BlockLocation, error) {
+	stored, err := s.Find(reviewID)
+	if err != nil {
+		return nil, err
+	}
+	for stepIndex, step := range stored.Review.Steps {
+		for _, block := range step.Blocks {
+			if block.ID == blockID {
+				return &BlockLocation{Stored: stored, StepIndex: stepIndex, Block: block}, nil
+			}
+		}
+	}
+	return nil, &NotFoundError{Message: fmt.Sprintf("Block %s does not exist in review %s", blockID, reviewID)}
 }
 
 // Create validates and atomically writes the files that make up a new review.

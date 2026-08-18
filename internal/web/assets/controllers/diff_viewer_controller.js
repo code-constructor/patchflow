@@ -8,25 +8,69 @@ export default class extends Controller {
   /** Restores the preferred layout and renders the initial diff. */
   connect() {
     const configuredMode = this.initialValue === "unified" ? "line-by-line" : "side-by-side"
-    this.mode = localStorage.getItem("patchflow-diff-mode") || configuredMode
+
+    this.receiveMode = this.receiveMode.bind(this)
+    window.addEventListener("patchflow:diff-mode", this.receiveMode)
+    this.mode = this.modeFromURL() || configuredMode
+    this.writeModeToURL()
     this.render()
+  }
+
+  /** Stops synchronizing this viewer after Turbo removes it. */
+  disconnect() {
+    window.removeEventListener("patchflow:diff-mode", this.receiveMode)
   }
 
   /** Switches the current diff to side-by-side presentation. */
   showSplit() {
-    this.mode = "side-by-side"
-    this.render()
+    this.selectMode("side-by-side")
   }
 
   /** Switches the current diff to a single inline presentation. */
   showUnified() {
-    this.mode = "line-by-line"
+    this.selectMode("line-by-line")
+  }
+
+  /** Makes a selected layout shareable and synchronizes sibling diff blocks. */
+  selectMode(mode) {
+    this.mode = mode
+    this.writeModeToURL()
     this.render()
+    window.dispatchEvent(new CustomEvent("patchflow:diff-mode", { detail: { mode, source: this } }))
+  }
+
+  /** Applies a layout selected in another diff block on the same chapter. */
+  receiveMode(event) {
+    if (event.detail.source === this || event.detail.mode === this.mode) return
+
+    this.mode = event.detail.mode
+    this.render()
+  }
+
+  /** Reads the optional shareable diff layout from the current URL. */
+  modeFromURL() {
+    const value = new URL(window.location.href).searchParams.get("diff")
+    if (value === "split") return "side-by-side"
+    if (value === "unified") return "line-by-line"
+    return null
+  }
+
+  /** Stores presentation state in the URL and carries it into review links. */
+  writeModeToURL() {
+    const value = this.mode === "line-by-line" ? "unified" : "split"
+    const current = new URL(window.location.href)
+    current.searchParams.set("diff", value)
+    history.replaceState(history.state, "", current)
+
+    for (const link of document.querySelectorAll("[data-preserve-diff-mode]")) {
+      const target = new URL(link.href, window.location.href)
+      target.searchParams.set("diff", value)
+      link.href = target
+    }
   }
 
   /** Rebuilds Diff2Html output and reapplies Patchflow's syntax spans. */
   render() {
-    localStorage.setItem("patchflow-diff-mode", this.mode)
     this.outputTarget.innerHTML = globalThis.Diff2Html.html(this.sourceTarget.textContent, {
       drawFileList: false,
       matching: "lines",

@@ -64,22 +64,51 @@ type ReviewView struct {
 }
 
 // StepLink is a navigable chapter summary.
-type StepLink struct{ ID, Title, Rationale, Priority string }
+type StepLink struct {
+	ID        string
+	Title     string
+	Rationale string
+	Priority  string
+	Attention []string
+}
 
 // ChapterView contains one resolved review step and its neighboring navigation.
 type ChapterView struct {
-	ReviewID                   string
-	Number, Total              int
-	Title, Rationale, Priority string
-	Blocks                     []BlockView
-	Previous, Next             *StepLink
+	ReviewID       string
+	Number         int
+	Total          int
+	Title          string
+	Rationale      string
+	Priority       string
+	ReviewQuestion string
+	Attention      []string
+	DesignGate     bool
+	Blocks         []BlockView
+	Previous       *StepLink
+	Next           *StepLink
 }
 
 // BlockView contains a narrative block plus any resolved source evidence or error.
 type BlockView struct {
-	ID, Type, Body, Kind, Path, View, Source, SourceSide, Error, Focus, Highlights, DiagramMarkdown string
-	StartLine, EndLine                                                                              int
-	CodeLines                                                                                       []CodeLine
+	ID              string
+	Type            string
+	Body            string
+	Kind            string
+	Path            string
+	View            string
+	Source          string
+	SourceSide      string
+	Error           string
+	Focus           string
+	Highlights      string
+	DiagramMarkdown string
+	ReferencePath   string
+	Label           string
+	StartLine       int
+	EndLine         int
+	CodeLines       []CodeLine
+	Focused         bool
+	Collapsed       bool
 }
 
 // CodeLine is one numbered source line with trusted server-generated highlighting.
@@ -170,6 +199,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.newReview(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/reviews":
 		a.createReview(w, r)
+	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/blocks/"):
+		a.block(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/steps/"):
 		a.chapter(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/reviews/"):
@@ -307,7 +338,7 @@ func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	view := ReviewView{ID: id, Title: stored.Review.Change.Title, Summary: stored.Review.Change.Summary, Status: humanize(stored.Review.Status), BaseSHA: stored.Review.Source.BaseSHA, TargetSHA: stored.Review.Source.TargetSHA, Overview: overview, Stale: stale}
 	for _, step := range stored.Review.Steps {
-		view.Steps = append(view.Steps, StepLink{ID: step.ID, Title: step.Title, Rationale: step.Rationale, Priority: step.Priority})
+		view.Steps = append(view.Steps, StepLink{ID: step.ID, Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, Attention: step.Attention})
 	}
 	a.render(w, "overview", Page{Title: view.Title + " · Patchflow", RepositoryName: repository.Name(), Notice: r.URL.Query().Get("notice"), Review: &view}, http.StatusOK)
 }
@@ -340,8 +371,13 @@ func (a *App) chapter(w http.ResponseWriter, r *http.Request) {
 		redirect(w, r, "/reviews/"+stored.Review.ID, "alert", "Review step not found.")
 		return
 	}
+	a.renderChapter(w, repository, store, stored, stepIndex, "")
+}
+
+// renderChapter resolves one step and optionally highlights an addressed block.
+func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, stepIndex int, focusedBlockID string) {
 	step := stored.Review.Steps[stepIndex]
-	chapter := ChapterView{ReviewID: stored.Review.ID, Number: stepIndex + 1, Total: len(stored.Review.Steps), Title: step.Title, Rationale: step.Rationale, Priority: step.Priority}
+	chapter := ChapterView{ReviewID: stored.Review.ID, Number: stepIndex + 1, Total: len(stored.Review.Steps), Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, ReviewQuestion: step.ReviewQuestion, Attention: step.Attention, DesignGate: step.Priority == "critical" && step.ReviewQuestion != ""}
 	if stepIndex > 0 {
 		previous := stored.Review.Steps[stepIndex-1]
 		chapter.Previous = &StepLink{ID: previous.ID, Title: previous.Title}
@@ -359,14 +395,55 @@ func (a *App) chapter(w http.ResponseWriter, r *http.Request) {
 		files[file.Path] = file
 	}
 	for _, block := range blocks {
-		chapter.Blocks = append(chapter.Blocks, buildBlock(repository, store, stored, files, block))
+		view := buildBlock(repository, store, stored, files, block)
+		view.ReferencePath = "/reviews/" + stored.Review.ID + "/blocks/" + block.ID
+		view.Label = blockLabel(block)
+		view.Focused = block.ID == focusedBlockID
+		chapter.Blocks = append(chapter.Blocks, view)
 	}
 	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", RepositoryName: repository.Name(), Chapter: &chapter}, http.StatusOK)
 }
 
+// block renders the current chapter for a globally unique block ID.
+func (a *App) block(w http.ResponseWriter, r *http.Request) {
+	repository, ok := a.requireRepository(w, r)
+	if !ok {
+		return
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "reviews" || parts[2] != "blocks" {
+		http.NotFound(w, r)
+		return
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	stored, err := store.Find(parts[1])
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	for stepIndex, step := range stored.Review.Steps {
+		blocks := step.Blocks
+		if stored.Review.SchemaVersion == 1 {
+			blocks = legacyBlocks(step)
+		}
+		for _, block := range blocks {
+			if block.ID != parts[3] {
+				continue
+			}
+			a.renderChapter(w, repository, store, stored, stepIndex, block.ID)
+			return
+		}
+	}
+	http.NotFound(w, r)
+}
+
 // buildBlock joins a declarative artifact block with evidence from its recorded commits.
 func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, files map[string]artifact.ChangedFile, block artifact.Block) BlockView {
-	view := BlockView{ID: block.ID, Type: block.Type, Body: block.Body, Kind: block.Kind, Path: block.Path, View: defaultString(block.View, "split"), SourceSide: block.Source, StartLine: block.StartLine, EndLine: block.EndLine}
+	view := BlockView{ID: block.ID, Type: block.Type, Body: block.Body, Kind: block.Kind, Path: block.Path, View: defaultString(block.View, "split"), SourceSide: block.Source, StartLine: block.StartLine, EndLine: block.EndLine, Collapsed: block.Collapsed}
 	switch block.Type {
 	case "diff":
 		file := files[block.Path]
@@ -404,6 +481,24 @@ func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored
 		}
 	}
 	return view
+}
+
+// blockLabel produces a compact chapter-navigation label from block semantics.
+func blockLabel(block artifact.Block) string {
+	switch block.Type {
+	case "diff", "code":
+		return block.Path
+	case "diagram":
+		return "Diagram · " + strings.TrimPrefix(block.Path, "diagrams/")
+	case "callout":
+		return humanize(block.Kind)
+	case "question":
+		return "Open question"
+	case "takeaway":
+		return "Chapter takeaway"
+	default:
+		return humanize(strings.ReplaceAll(block.ID, "-", "_"))
+	}
 }
 
 // legacyBlocks adapts a v1 file-oriented step into the v2 chapter rendering model.

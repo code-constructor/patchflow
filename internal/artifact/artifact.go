@@ -58,12 +58,14 @@ type ChangedFile struct {
 
 // Step is one ordered review chapter with its evidence blocks.
 type Step struct {
-	ID        string   `json:"id" yaml:"id"`
-	Title     string   `json:"title" yaml:"title"`
-	Priority  string   `json:"priority" yaml:"priority"`
-	Rationale string   `json:"rationale" yaml:"rationale"`
-	Files     []string `json:"files" yaml:"files"`
-	Blocks    []Block  `json:"blocks,omitempty" yaml:"blocks,omitempty"`
+	ID             string   `json:"id" yaml:"id"`
+	Title          string   `json:"title" yaml:"title"`
+	Priority       string   `json:"priority" yaml:"priority"`
+	Rationale      string   `json:"rationale" yaml:"rationale"`
+	ReviewQuestion string   `json:"review_question,omitempty" yaml:"review_question,omitempty"`
+	Attention      []string `json:"attention,omitempty" yaml:"attention,omitempty"`
+	Files          []string `json:"files" yaml:"files"`
+	Blocks         []Block  `json:"blocks,omitempty" yaml:"blocks,omitempty"`
 }
 
 // Block is one typed narrative building block in a v2 chapter.
@@ -78,6 +80,7 @@ type Block struct {
 	EndLine   int    `json:"end_line,omitempty" yaml:"end_line,omitempty"`
 	Kind      string `json:"kind,omitempty" yaml:"kind,omitempty"`
 	Focus     *Focus `json:"focus,omitempty" yaml:"focus,omitempty"`
+	Collapsed bool   `json:"collapsed,omitempty" yaml:"collapsed,omitempty"`
 }
 
 // Focus narrows a diff block to an important line range on one side.

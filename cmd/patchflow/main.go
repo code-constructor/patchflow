@@ -5,14 +5,18 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/traqx-ai/patchflow/internal/artifact"
 	"github.com/traqx-ai/patchflow/internal/gitrepo"
 	patchreview "github.com/traqx-ai/patchflow/internal/review"
 	patchflowweb "github.com/traqx-ai/patchflow/internal/web"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 // main passes command-line arguments to the testable command dispatcher.
@@ -33,10 +37,89 @@ func run(arguments []string) int {
 		return validate(arguments[1:])
 	case "serve":
 		return serve(arguments[1:])
+	case "show":
+		return show(arguments[1:])
 	default:
 		usage()
 		return 2
 	}
+}
+
+// show resolves a copied block path and prints its persisted chapter context.
+func show(arguments []string) int {
+	return showTo(os.Stdout, os.Stderr, arguments)
+}
+
+// showTo implements show with injectable output streams for deterministic tests.
+func showTo(stdout, stderr io.Writer, arguments []string) int {
+	flags := flag.NewFlagSet("show", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	repositoryPath := flags.String("repository", "", "path to the repository containing the review")
+	format := flags.String("format", "yaml", "output format: yaml or json")
+	if err := flags.Parse(arguments); err != nil {
+		return 2
+	}
+	if flags.NArg() != 1 || *repositoryPath == "" || (*format != "yaml" && *format != "json") {
+		fmt.Fprintln(stderr, "Usage: patchflow show --repository PATH [--format yaml|json] /reviews/REVIEW_ID/blocks/BLOCK_ID")
+		return 2
+	}
+	reviewID, blockID, err := parseBlockReference(flags.Arg(0))
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	repository, err := gitrepo.Open(*repositoryPath)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	location, err := store.FindBlock(reviewID, blockID)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	step := location.Stored.Review.Steps[location.StepIndex]
+	payload := struct {
+		ReviewID     string         `json:"review_id" yaml:"review_id"`
+		ReviewTitle  string         `json:"review_title" yaml:"review_title"`
+		ChapterID    string         `json:"chapter_id" yaml:"chapter_id"`
+		ChapterTitle string         `json:"chapter_title" yaml:"chapter_title"`
+		Block        artifact.Block `json:"block" yaml:"block"`
+	}{
+		ReviewID:     location.Stored.Review.ID,
+		ReviewTitle:  location.Stored.Review.Change.Title,
+		ChapterID:    step.ID,
+		ChapterTitle: step.Title,
+		Block:        location.Block,
+	}
+	if *format == "json" {
+		err = json.NewEncoder(stdout).Encode(payload)
+	} else {
+		err = yaml.NewEncoder(stdout).Encode(payload)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	return 0
+}
+
+// parseBlockReference extracts validated review and block IDs from a copied path.
+func parseBlockReference(reference string) (string, string, error) {
+	parsed, err := url.ParseRequestURI(reference)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid block reference: %w", err)
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "reviews" || parts[2] != "blocks" || parts[1] == "" || parts[3] == "" {
+		return "", "", fmt.Errorf("block reference must match /reviews/REVIEW_ID/blocks/BLOCK_ID")
+	}
+	return parts[1], parts[3], nil
 }
 
 // validate checks one review artifact and prints either human-readable or JSON output.
@@ -152,7 +235,7 @@ func loadReview(path string) (*artifact.Review, error) {
 
 // usage prints the supported top-level commands to standard error.
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: patchflow <create|validate|serve> [options]")
+	fmt.Fprintln(os.Stderr, "Usage: patchflow <create|validate|serve|show> [options]")
 }
 
 // repositoryFromReviewPath finds the repository root above a .patchflow review path.

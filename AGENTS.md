@@ -28,6 +28,10 @@ change and understood later.
 - Preserve evidence: artifacts must record the exact base and target commit
   SHAs they describe. A changed target is stale and requires a new or revised
   review artifact.
+- Addressable by default: every narrative block has a stable semantic ID.
+  Resource identity belongs in URL paths, shareable presentation state in query
+  parameters, and an addressed block directly in its own resource path. Do not
+  hide shareable UI state in application storage.
 
 ## Initial Product Scope
 
@@ -37,8 +41,8 @@ Build a vertical slice before recreating a full GitHub-like diff viewer:
 2. Create and validate a machine-readable review artifact.
 3. Render a review overview with an ordered set of review steps.
 4. Show a simple unified text diff in the planned order.
-5. Compose chapters from prose, code, diff, callout, question, and diagram
-   blocks. Interactive comments are intentionally deferred.
+5. Compose chapters from prose, code, diff, callout, question, diagram, and
+   takeaway blocks. Interactive comments are intentionally deferred.
 6. Render Markdown, Mermaid, syntax-highlighted code, and split/unified diffs.
 
 Large-diff virtualization, GitHub PR import, notebook/image viewers, and
@@ -76,6 +80,12 @@ Patchflow must avoid reviewing its own generated review artifact by default.
   browser assets. Do not require a database, Redis, Docker, or a cloud service.
 - Treat all filesystem paths from requests or artifacts as untrusted. Resolve
   them relative to the selected repository and reject traversal outside it.
+- Keep semantic review content in Git-native artifacts. Use URLs for navigation,
+  focus, and presentation state; never encode review prose or absolute local
+  paths into shareable URLs.
+- Keep visual design values behind the semantic CSS tokens in `:root`. Add or
+  override palette, typography, surface, border, radius, shadow, and layout
+  tokens instead of scattering literal theme values across components.
 
 ## Working Agreement
 
@@ -90,3 +100,5 @@ Patchflow must avoid reviewing its own generated review artifact by default.
 - Do not commit compiled binaries, temporary files, or machine-specific
   configuration.
 - Make product decisions and artifact-schema changes visible in committed docs.
+- Follow `docs/review-composition.md` when generating or changing the narrative
+  structure of a review.

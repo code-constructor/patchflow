@@ -36,8 +36,9 @@ critiqued.
 2. Resolve and record the exact base and target commit SHAs.
 3. Let an agent explain the change and propose an ordered review plan.
 4. Read an agent-composed chapter built from prose, code, diff, callout,
-   question, and diagram blocks.
-5. Review syntax-highlighted split or unified diffs in that planned order.
+   question, diagram, and takeaway blocks.
+5. Link directly to a stable block ID and carry syntax-highlighted split or
+   unified diff state in the URL.
 6. Preserve the resulting documentation as a repository-local review artifact.
 
 The commit SHAs are part of the evidence. If the target changes, the existing
@@ -63,6 +64,21 @@ source remain part of the artifact instead of existing only as rendered UI
 state. Artifact v2 deliberately leaves interactive comments out while the
 chapter language is established; v1 artifacts remain readable.
 
+Every v2 block has a review-wide unique semantic ID. Its copy control places a
+stable `/reviews/<review-id>/blocks/<block-id>` path on the clipboard without
+navigating, while `?diff=split|unified` carries shareable presentation state.
+See the [review composition guide](docs/review-composition.md) for the narrative
+and URL conventions.
+
+Resolve a copied path back to its persisted chapter and block from the command
+line. YAML is the default; pass `--format json` for programmatic use:
+
+```sh
+bin/patchflow show \
+  --repository /absolute/path/to/repository \
+  /reviews/<review-id>/blocks/<block-id>
+```
+
 Generated `.patchflow` artifacts are excluded from the diff under review by
 default, preventing Patchflow from reviewing its own output.
 
@@ -73,7 +89,10 @@ The initial vertical slice focuses on:
 - selecting a local Git diff and resolving its source commits;
 - creating and validating a machine-readable review artifact;
 - rendering an overview with ordered, block-based review chapters;
+- framing chapters with review questions, attention labels, decision gates, and
+  addressable chapter takeaways;
 - displaying syntax-highlighted split and unified diffs in the planned order;
+- collapsing generated or mechanical evidence without removing it from scope;
 - rendering Markdown and Mermaid diagrams.
 
 Large-diff virtualization, GitHub pull-request import, specialized notebook or
@@ -87,6 +106,8 @@ placeholder so they do not block the rest of a review step.
 - the standard library HTTP server and typed `html/template` view models;
 - server-rendered HTML enhanced with Turbo and Stimulus;
 - browser-native ES modules and an Import Map, with no Node or Vite pipeline;
+- a token-based CSS theme whose palette, typography, surfaces, radii, shadows,
+  and review layout can be changed through `:root` overrides;
 - Diff2Html and Chroma for local diff rendering and syntax highlighting; and
 - JSON Schema, templates, styles, and browser dependencies embedded into the
   self-contained binary with `go:embed`.

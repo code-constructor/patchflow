@@ -12,28 +12,36 @@
 
 {{define "markdown"}}<div data-controller="review-document"><pre class="markdown-source" data-review-document-target="source">{{.}}</pre><div class="markdown" data-review-document-target="output"></div></div>{{end}}
 
+{{define "block_reference"}}<button type="button" class="block-copy" data-controller="block-reference" data-block-reference-path-value="{{.ReferencePath}}" data-action="block-reference#copy" aria-label="Copy path for block {{.ID}}" title="Copy block path">
+  <svg class="block-copy__icon" data-block-reference-target="copyIcon" aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
+  <svg class="block-copy__icon" data-block-reference-target="copiedIcon" aria-hidden="true" viewBox="0 0 24 24" hidden><path d="m5 12 4 4L19 6"></path></svg>
+  <span class="visually-hidden" data-block-reference-target="status" aria-live="polite"></span>
+</button>{{end}}
+
 {{define "block"}}
   {{if eq .Type "prose"}}
-    <section class="review-block review-block--prose" id="{{.ID}}">{{template "markdown" .Body}}</section>
+    <section class="review-block review-block--prose{{if .Focused}} is-focused{{end}}" id="{{.ID}}"><div class="block-reference-row">{{template "block_reference" .}}</div>{{template "markdown" .Body}}</section>
   {{else if eq .Type "callout"}}
-    <aside class="review-block callout callout--{{.Kind}}" id="{{.ID}}"><div class="eyebrow">{{.Kind}}</div>{{template "markdown" .Body}}</aside>
+    <aside class="review-block callout callout--{{.Kind}}{{if .Focused}} is-focused{{end}}" id="{{.ID}}"><div class="block-heading"><div class="eyebrow">{{.Kind}}</div>{{template "block_reference" .}}</div>{{template "markdown" .Body}}</aside>
   {{else if eq .Type "question"}}
-    <aside class="review-block review-question" id="{{.ID}}"><div class="eyebrow">Open question</div>{{template "markdown" .Body}}</aside>
+    <aside class="review-block review-question{{if .Focused}} is-focused{{end}}" id="{{.ID}}"><div class="block-heading"><div class="eyebrow">Open question</div>{{template "block_reference" .}}</div>{{template "markdown" .Body}}</aside>
+  {{else if eq .Type "takeaway"}}
+    <aside class="review-block chapter-takeaway{{if .Focused}} is-focused{{end}}" id="{{.ID}}"><div class="block-heading"><div class="eyebrow">Chapter takeaway</div>{{template "block_reference" .}}</div>{{template "markdown" .Body}}</aside>
   {{else if eq .Type "diff"}}
-    <section class="review-block card code-card" id="{{.ID}}">
-      <header class="code-card__header"><div><div class="eyebrow">Changed file</div><h3>{{.Path}}</h3></div>{{if .Focus}}<span class="focus-label">{{.Focus}}</span>{{end}}</header>
-      {{if .Error}}<div class="diff-notice"><strong>Diff not displayed</strong><p>{{.Error}}. Review this generated or unusually large file directly in the repository.</p></div>{{else}}{{template "diff" .}}{{end}}
+    <section class="review-block card code-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}">
+      <header class="code-card__header"><div><div class="eyebrow">Changed file</div><h3>{{.Path}}</h3></div><div class="code-card__meta">{{if .Focus}}<span class="focus-label">{{.Focus}}</span>{{end}}{{template "block_reference" .}}</div></header>
+      {{if .Error}}<div class="diff-notice"><strong>Diff not displayed</strong><p>{{.Error}}. Review this generated or unusually large file directly in the repository.</p></div>{{else if .Collapsed}}<details class="evidence-disclosure"><summary>Show supporting diff</summary>{{template "diff" .}}</details>{{else}}{{template "diff" .}}{{end}}
     </section>
   {{else if eq .Type "code"}}
-    <section class="review-block card code-card" id="{{.ID}}">
-      <header class="code-card__header"><div><div class="eyebrow">{{.SourceSide}} source</div><h3>{{.Path}}</h3></div><span class="focus-label">lines {{.StartLine}}–{{.EndLine}}</span></header>
+    <section class="review-block card code-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}">
+      <header class="code-card__header"><div><div class="eyebrow">{{.SourceSide}} source</div><h3>{{.Path}}</h3></div><div class="code-card__meta"><span class="focus-label">lines {{.StartLine}}–{{.EndLine}}</span>{{template "block_reference" .}}</div></header>
       {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}<div class="code-excerpt">{{range .CodeLines}}<div class="code-excerpt__line"><span class="code-excerpt__number">{{.Number}}</span><code>{{.HTML}}</code></div>{{end}}</div>{{end}}
     </section>
   {{else if eq .Type "diagram"}}
-    <section class="review-block card diagram-card" id="{{.ID}}" data-controller="diagram-viewer" data-action="click->diagram-viewer#expand">
+    <section class="review-block card diagram-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="diagram-viewer" data-action="click->diagram-viewer#expand">
       <header class="diagram-card__header">
         <div class="eyebrow">Diagram</div>
-        {{if not .Error}}<button type="button" class="diagram-expand" aria-label="Open diagram in fullscreen"><span aria-hidden="true">⛶</span> Expand</button>{{end}}
+        <div class="diagram-card__actions">{{template "block_reference" .}}{{if not .Error}}<button type="button" class="diagram-expand" aria-label="Open diagram in fullscreen"><span aria-hidden="true">⛶</span> Expand</button>{{end}}</div>
       </header>
       {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}{{template "markdown" .DiagramMarkdown}}{{end}}
       {{if not .Error}}

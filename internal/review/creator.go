@@ -51,7 +51,28 @@ func (c *Creator) Create(baseRef, targetRef string) (*Stored, error) {
 
 // overview renders the human-readable introduction beside a baseline artifact.
 func overview(value *artifact.Review) string {
-	lines := []string{"# " + value.Change.Title, "", value.Change.Summary, "", "This baseline plan was generated from repository structure. Ask a Coding Agent to enrich the summary, rationale, and ordering before relying on it for a final review.", "", "## Review plan", ""}
+	lines := []string{
+		"# " + value.Change.Title,
+		"",
+		"## Purpose and outcome",
+		"",
+		value.Change.Summary,
+		"",
+		"## Main decision and review focus",
+		"",
+		"This baseline plan was generated from repository structure. Ask a Coding Agent to replace this paragraph with the change's purpose, central design decision, and the feedback that matters most before relying on it for a final review.",
+		"",
+		"## Evidence",
+		"",
+		fmt.Sprintf("The artifact binds %d changed %s to exact base and target commits. Record relevant tests, checks, benchmarks, screenshots, or manual verification here.", len(value.Change.Files), plural(len(value.Change.Files), "file", "files")),
+		"",
+		"## Scope, risks, and uncertainty",
+		"",
+		"Repository structure cannot reveal author intent, non-goals, tradeoffs, or operational risk. A Coding Agent should make those boundaries explicit and distinguish unresolved questions from established behavior.",
+		"",
+		"## Reading path",
+		"",
+	}
 	for index, step := range value.Steps {
 		lines = append(lines, fmt.Sprintf("%d. **%s** — %s", index+1, step.Title, step.Rationale))
 	}

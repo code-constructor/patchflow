@@ -35,24 +35,63 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 
 	overview := perform(app, http.MethodGet, reviewPath, "")
-	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") {
+	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") {
 		t.Fatalf("unexpected overview: %d %s", overview.Code, overview.Body.String())
 	}
 
 	chapter := perform(app, http.MethodGet, reviewPath+"/steps/domain", "")
-	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\""} {
+	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\"", "id=\"domain-intro\"", "type=\"button\"", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-intro\"", "aria-label=\"Copy path for block domain-intro\"", "data-controller=\"chapter-navigation\"", "Review question", "Does the domain behavior", "Chapter takeaway", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-takeaway\""} {
 		if !strings.Contains(chapter.Body.String(), expected) {
 			t.Errorf("chapter missing %q", expected)
 		}
 	}
+	if strings.Contains(chapter.Body.String(), "href=\""+reviewPath+"/blocks/domain-intro\"") {
+		t.Error("block copy control must not navigate")
+	}
+
+	block := perform(app, http.MethodGet, reviewPath+"/blocks/domain-intro?diff=unified", "")
+	if block.Code != http.StatusOK || !strings.Contains(block.Body.String(), "review-block--prose is-focused") || block.Header().Get("Location") != "" {
+		t.Fatalf("unexpected block page: %d %q", block.Code, block.Header().Get("Location"))
+	}
+	takeaway := perform(app, http.MethodGet, reviewPath+"/blocks/domain-takeaway", "")
+	if takeaway.Code != http.StatusOK || !strings.Contains(takeaway.Body.String(), "chapter-takeaway is-focused") {
+		t.Fatalf("takeaway block is not directly addressable: %d", takeaway.Code)
+	}
 
 	asset := perform(app, http.MethodGet, "/assets/application.js", "")
-	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") || !strings.Contains(asset.Body.String(), "diagram-viewer") {
+	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") || !strings.Contains(asset.Body.String(), "diagram-viewer") || !strings.Contains(asset.Body.String(), "block-reference") || !strings.Contains(asset.Body.String(), "chapter-navigation") {
 		t.Fatalf("embedded asset unavailable: %d", asset.Code)
+	}
+	blockController := perform(app, http.MethodGet, "/assets/controllers/block_reference_controller.js", "")
+	if blockController.Code != http.StatusOK || !strings.Contains(blockController.Body.String(), "navigator.clipboard.writeText(this.pathValue)") || strings.Contains(blockController.Body.String(), "window.location") {
+		t.Fatalf("block reference controller does not copy paths in place: %d", blockController.Code)
+	}
+	chapterController := perform(app, http.MethodGet, "/assets/controllers/chapter_navigation_controller.js", "")
+	if chapterController.Code != http.StatusOK || !strings.Contains(chapterController.Body.String(), "scrollIntoView") || strings.Contains(chapterController.Body.String(), "history.pushState") || strings.Contains(chapterController.Body.String(), "history.replaceState") {
+		t.Fatalf("chapter navigation does not scroll in place: %d", chapterController.Code)
 	}
 	diagramController := perform(app, http.MethodGet, "/assets/controllers/diagram_viewer_controller.js", "")
 	if diagramController.Code != http.StatusOK || !strings.Contains(diagramController.Body.String(), "showModal") {
 		t.Fatalf("diagram viewer controller unavailable: %d", diagramController.Code)
+	}
+	diffController := perform(app, http.MethodGet, "/assets/controllers/diff_viewer_controller.js", "")
+	if diffController.Code != http.StatusOK || !strings.Contains(diffController.Body.String(), "searchParams.set(\"diff\"") || strings.Contains(diffController.Body.String(), "localStorage") {
+		t.Fatalf("diff layout is not URL-backed: %d", diffController.Code)
+	}
+	styles := perform(app, http.MethodGet, "/assets/styles/application.css", "")
+	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", ".chapter-rail { position: sticky", ".callout, .review-question, .chapter-takeaway { width: 100%"} {
+		if !strings.Contains(styles.Body.String(), expected) {
+			t.Errorf("theme stylesheet missing %q", expected)
+		}
+	}
+
+	securityChapter := perform(app, http.MethodGet, reviewPath+"/steps/security", "")
+	if securityChapter.Code != http.StatusOK || !strings.Contains(securityChapter.Body.String(), "Decision gate") {
+		t.Fatalf("critical review question is missing its decision gate: %d", securityChapter.Code)
+	}
+	generatedChapter := perform(app, http.MethodGet, reviewPath+"/steps/generated", "")
+	if generatedChapter.Code != http.StatusOK || !strings.Contains(generatedChapter.Body.String(), "<details class=\"evidence-disclosure\">") {
+		t.Fatalf("mechanical evidence is not collapsed: %d", generatedChapter.Code)
 	}
 }
 
@@ -194,7 +233,9 @@ func featureRepository(t *testing.T) string {
 	git(t, directory, "checkout", "-b", "feature/account-locking")
 	write(t, directory, "app/models/account.rb", "class Account\n  def locked? = true\nend\n")
 	write(t, directory, "app/controllers/sessions_controller.rb", "class SessionsController\nend\n")
+	write(t, directory, "config/auth_policy.rb", "AUTH_POLICY = :local_only\n")
 	write(t, directory, "test/models/account_test.rb", "# account locking behavior\n")
+	write(t, directory, "vendor/library.min.js", "window.library=true;\n")
 	write(t, directory, ".patchflow/generated.txt", "must not review me\n")
 	git(t, directory, "add", ".")
 	git(t, directory, "commit", "-m", "Add account locking")

@@ -22,7 +22,7 @@ func TestSharedV2Fixtures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid fixture failed: %v", err)
 	}
-	if review.SchemaVersion != 2 || len(review.Steps) != 2 {
+	if review.SchemaVersion != 2 || len(review.Steps) != 2 || review.Steps[0].ReviewQuestion == "" || len(review.Steps[0].Attention) != 2 || review.Steps[0].Blocks[len(review.Steps[0].Blocks)-1].Type != "takeaway" {
 		t.Fatalf("unexpected review: %#v", review)
 	}
 

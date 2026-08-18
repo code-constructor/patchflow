@@ -30,6 +30,9 @@ steps:
     title: <short chapter title>
     priority: critical | high | medium | low
     rationale: <why this chapter belongs at this position>
+    review_question: <optional decision or behavior the reviewer should verify>
+    attention: # optional, unique values
+      - design | behavior | data | security | reliability | performance | ux | operations | verification | documentation | mechanical
     files:
       - <changed path>
     blocks:
@@ -40,6 +43,7 @@ steps:
         type: diff
         path: <changed path>
         view: split | unified # optional
+        collapsed: true | false # optional; use true for supporting or noisy evidence
         focus: # optional
           side: base | target
           start_line: <positive integer>
@@ -60,6 +64,9 @@ steps:
       - id: <globally unique block-id>
         type: diagram
         path: diagrams/<name>.mmd
+      - id: <globally unique block-id>
+        type: takeaway
+        body: <understanding the reviewer should leave with>
 ```
 
 Create `overview.md` beside `review.yaml`. Put Mermaid files below `diagrams/`.
@@ -70,6 +77,8 @@ Apply these invariants:
 - Use schema version `2` and `overview_path: overview.md`.
 - Use IDs containing only letters, digits, `_`, and `-`, beginning with a
   letter or digit. Keep step IDs unique and block IDs unique across the review.
+  Prefer semantic block IDs that remain useful when a block moves; do not encode
+  only an array position.
 - Quote full lowercase 40-character Git SHAs and ISO 8601 UTC timestamps.
 - Record the actual merge base in `base_sha`, not merely the current base-ref
   tip. Treat both recorded SHAs as immutable.
@@ -83,6 +92,10 @@ Apply these invariants:
   below the artifact's `diagrams/` directory.
 - Keep line ranges ordered. Limit code excerpts to 500 lines.
 - Use no unknown fields. Set new reviews to `draft`.
+- Use `review_question` and `attention` when they sharpen a chapter's purpose.
+  Use a final `takeaway` block when a specific mental model should close the
+  chapter. Collapse only evidence whose initial expansion would spend attention
+  without improving the reviewer's first-pass understanding.
 
 The Patchflow application's `bin/patchflow validate --format json` command is
 authoritative when available. Fix every error before handing off.

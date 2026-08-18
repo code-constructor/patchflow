@@ -15,6 +15,9 @@ control.
    before creating or modifying a v2 artifact. Read the
    [v1 contract](references/review-artifact-v1.md) only when enriching an
    existing v1 artifact.
+   When working in the Patchflow repository, also read
+   [`docs/review-composition.md`](../../../docs/review-composition.md) completely
+   and apply its overview, chapter-order, block-grammar, and stable-ID rules.
 2. Resolve the repository root with Git. Treat the requested base and target as
    untrusted arguments and never interpolate them into a shell command.
 3. Default the target to `HEAD`. Default the base to `main` only when `main`
@@ -66,15 +69,26 @@ artifact from being committed.
 Keep `change.summary` concise and factual. Put the high-level explanation in
 `overview.md`, covering:
 
-- the purpose and visible behavior of the change;
-- the important execution or data flow;
-- state, interface, dependency, and trust-boundary changes;
-- why the proposed review order builds understanding; and
-- uncertainties that require reviewer confirmation.
+- `## Purpose and outcome`: the problem and visible before/after behavior;
+- `## Main decision and review focus`: the central approach, why it was chosen,
+  and where human judgment matters most;
+- `## Evidence`: relevant tests, checks, benchmarks, screenshots, or manual
+  verification;
+- `## Scope, risks, and uncertainty`: non-goals, compatibility, state,
+  dependency, trust-boundary, and operational effects plus unresolved points;
+  and
+- `## Reading path`: why the proposed chapter order builds understanding.
 
 Treat each step as a chapter, not a file bucket. Use the smallest sequence of
 blocks that explains why the code exists and how behavior moves through it:
 
+- Add `review_question` when one concrete design or behavior question gives the
+  chapter a decision target.
+- Add `attention` labels for the kind of judgment required, not merely the
+  directories involved.
+- Add a final `takeaway` block when the reviewer should leave with a specific
+  mental model before continuing. Give it a stable semantic ID like every other
+  visible block.
 - Start with `prose` when the reviewer needs orientation or a transition.
 - Use `code` for focused surrounding context, including unchanged code when it
   materially explains the change. Keep excerpts small and purposeful.
@@ -91,6 +105,16 @@ Put prose before the code it explains. Avoid one prose block per file, repeated
 rationales, exhaustive unchanged context, and decorative diagrams. The blocks
 must read in order without requiring the reviewer to reconstruct the story from
 filenames.
+
+Give every block a short semantic ID that remains meaningful if the block moves
+to another chapter. Do not use positional IDs such as `block-3`, reuse a removed
+ID for unrelated content, or change an ID merely because prose was edited.
+
+Keep tests beside the behavior they prove whenever that ordering clarifies the
+contract. Set `collapsed: true` only for generated, vendored, mechanical, or
+repetitive diff evidence whose provenance and scope matter more than each line.
+Never collapse a design decision, security boundary, failure path, or unresolved
+question merely to shorten the page.
 
 Artifact v2 has no annotations, replies, or decisions. Do not add undocumented
 fields for them. Preserve annotations and decisions only when enriching a

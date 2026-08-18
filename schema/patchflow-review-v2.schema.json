@@ -117,6 +117,15 @@
         "title": { "$ref": "#/$defs/text" },
         "priority": { "enum": ["critical", "high", "medium", "low"] },
         "rationale": { "$ref": "#/$defs/text" },
+        "review_question": { "$ref": "#/$defs/text" },
+        "attention": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["design", "behavior", "data", "security", "reliability", "performance", "ux", "operations", "verification", "documentation", "mechanical"]
+          }
+        },
         "files": {
           "type": "array",
           "minItems": 1,
@@ -132,7 +141,8 @@
               { "$ref": "#/$defs/code_block" },
               { "$ref": "#/$defs/callout_block" },
               { "$ref": "#/$defs/question_block" },
-              { "$ref": "#/$defs/diagram_block" }
+              { "$ref": "#/$defs/diagram_block" },
+              { "$ref": "#/$defs/takeaway_block" }
             ]
           }
         }
@@ -167,7 +177,8 @@
         "type": { "const": "diff" },
         "path": { "$ref": "#/$defs/path" },
         "view": { "enum": ["split", "unified"] },
-        "focus": { "$ref": "#/$defs/focus" }
+        "focus": { "$ref": "#/$defs/focus" },
+        "collapsed": { "type": "boolean" }
       }
     },
     "code_block": {
@@ -201,6 +212,16 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "type": { "const": "question" },
+        "body": { "$ref": "#/$defs/text" }
+      }
+    },
+    "takeaway_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "body"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "takeaway" },
         "body": { "$ref": "#/$defs/text" }
       }
     },

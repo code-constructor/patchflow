@@ -33,6 +33,28 @@ func TestCreatorPersistsValidV2Review(t *testing.T) {
 	}
 }
 
+// TestStoreFindBlockResolvesChapterContext protects copied block-reference lookup.
+func TestStoreFindBlockResolvesChapterContext(t *testing.T) {
+	directory := testRepository(t)
+	repository, _ := gitrepo.Open(directory)
+	store, _ := NewStore(repository.Root(), nil)
+	stored, err := (&Creator{Repository: repository, Store: store}).Create("main", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := stored.Review.Steps[0].Blocks[0]
+	location, err := store.FindBlock(stored.Review.ID, block.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if location.Stored.Review.ID != stored.Review.ID || location.StepIndex != 0 || location.Block.ID != block.ID {
+		t.Fatalf("unexpected block location: %#v", location)
+	}
+	if _, err := store.FindBlock(stored.Review.ID, "missing-block"); err == nil {
+		t.Fatal("expected missing block error")
+	}
+}
+
 // TestStoreRejectsPatchflowSymlinkEscape protects writes from a redirected artifact root.
 func TestStoreRejectsPatchflowSymlinkEscape(t *testing.T) {
 	directory := testRepository(t)
