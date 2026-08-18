@@ -31,7 +31,9 @@ class ReviewFlowTest < ActionDispatch::IntegrationTest
       get review_step_path(artifact.id, step.fetch("id"))
       assert_response :success
       assert_includes response.body, step.fetch("rationale")
-      assert_includes response.body, "diff --git"
+      assert_includes response.body, "data-controller=\"diff-viewer\""
+      assert_includes response.body, "Split"
+      assert_includes response.body, "Unified"
       assert_includes response.body, step.fetch("files").first
 
       file_path = step.fetch("files").first
@@ -51,6 +53,27 @@ class ReviewFlowTest < ActionDispatch::IntegrationTest
       reloaded = Patchflow::ReviewStore.new(directory).find(artifact.id)
       assert_equal "Verify this boundary.", reloaded.annotations.last.fetch("body")
       assert_equal 2, reloaded.annotations.last.fetch("start_line")
+    end
+  end
+
+  test "keeps a review step usable when one diff exceeds the display limit" do
+    with_feature_repository do |directory|
+      large_path = "vendor/javascript/mermaid.standalone.js"
+      write_repository_file(directory, large_path, "const generated = 1;\n" * 100_000)
+      git!(directory, "add", large_path)
+      git!(directory, "commit", "-m", "Vendor generated JavaScript")
+
+      post repository_path, params: { repository_path: directory }
+      post reviews_path, params: { base_ref: "main", target_ref: "HEAD" }
+
+      artifact = Patchflow::ReviewStore.new(directory).all.first
+      step = artifact.steps.find { |candidate| candidate.fetch("files").include?(large_path) }
+      get review_step_path(artifact.id, step.fetch("id"))
+
+      assert_response :success
+      assert_includes response.body, "Diff not displayed"
+      assert_includes response.body, "exceeds the current 2 MB display limit"
+      assert_includes response.body, "Scan generated and vendored files"
     end
   end
 end

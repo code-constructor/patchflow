@@ -10,7 +10,8 @@
   <span class="priority priority--<%= @step.fetch('priority') %>"><%= @step.fetch("priority") %> priority</span>
 </section>
 
-<% @diffs.each do |path, diff| %>
+<% @step.fetch("files").each do |path| %>
+  <% diff = @diffs[path] %>
   <section class="section card">
     <h3><%= path %></h3>
 
@@ -24,10 +25,24 @@
       </div>
     <% end %>
 
-    <div class="diff-block">
-      <div class="diff-header"><%= path %></div>
-      <pre class="diff"><%= diff.presence || "No textual diff available for this path." %></pre>
-    </div>
+    <% if @diff_errors[path] %>
+      <div class="diff-notice">
+        <strong>Diff not displayed</strong>
+        <p><%= @diff_errors.fetch(path) %>. Review this generated or unusually large file directly in the repository.</p>
+      </div>
+    <% else %>
+      <div class="diff-viewer"
+           data-controller="diff-viewer"
+           data-diff-viewer-highlights-value="<%= @diff_highlights.fetch(path).to_json %>">
+        <div class="diff-toolbar" aria-label="Diff layout">
+          <button type="button" class="diff-mode-button" data-diff-viewer-target="splitButton" data-action="diff-viewer#showSplit">Split</button>
+          <button type="button" class="diff-mode-button" data-diff-viewer-target="unifiedButton" data-action="diff-viewer#showUnified">Unified</button>
+        </div>
+        <pre hidden data-diff-viewer-target="source"><%= diff %></pre>
+        <div class="diff-render" data-diff-viewer-target="output"></div>
+        <noscript><pre class="diff"><%= diff.presence || "No textual diff available for this path." %></pre></noscript>
+      </div>
+    <% end %>
 
     <%= form_with url: review_annotations_path(@artifact.id), class: "stack annotation-form" do |form| %>
       <%= form.hidden_field :step_id, value: @step.fetch("id") %>

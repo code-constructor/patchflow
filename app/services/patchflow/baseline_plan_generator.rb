@@ -51,6 +51,13 @@ module Patchflow
         patterns: %r{\A(?:test|spec)/}
       },
       {
+        id: "generated",
+        title: "Scan generated and vendored files",
+        priority: "low",
+        rationale: "Generated, minified, and vendored files are usually better verified through their source or generation process than line by line.",
+        patterns: %r{(?:\A(?:vendor|node_modules)/|(?:\.min\.(?:css|js)|\.lock)\z)}i
+      },
+      {
         id: "supporting",
         title: "Review supporting changes",
         priority: "low",

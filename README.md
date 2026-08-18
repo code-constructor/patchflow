@@ -35,7 +35,7 @@ critiqued.
 1. Select a diff in a local Git repository.
 2. Resolve and record the exact base and target commit SHAs.
 3. Let an agent explain the change and propose an ordered review plan.
-4. Review a unified text diff in that planned order.
+4. Review a syntax-highlighted split or unified diff in that planned order.
 5. Add overview, file, and line or range annotations.
 6. Preserve the resulting documentation as a repository-local review artifact.
 
@@ -71,13 +71,14 @@ The initial vertical slice focuses on:
 - selecting a local Git diff and resolving its source commits;
 - creating and validating a machine-readable review artifact;
 - rendering an overview with ordered review steps;
-- displaying a simple unified text diff in the planned order;
+- displaying syntax-highlighted split and unified diffs in the planned order;
 - supporting overview, file, and line or range annotations; and
 - rendering Markdown and Mermaid diagrams.
 
-Split diffs, large-diff virtualization, GitHub pull-request import, specialized
-notebook or image viewers, and extensive keyboard navigation are deliberately
-deferred until the core workflow is useful.
+Large-diff virtualization, GitHub pull-request import, specialized notebook or
+image viewers, and extensive keyboard navigation are deliberately deferred
+until the core workflow is useful. Oversized files currently receive a visible
+placeholder so they do not block the rest of a review step.
 
 ## Technical foundation
 
@@ -85,6 +86,7 @@ deferred until the core workflow is useful.
 - SQLite for application data, cache, jobs, and Action Cable
 - Server-rendered HTML with Hotwire, Turbo, and Stimulus
 - Importmap for JavaScript dependencies
+- Diff2Html and Rouge for local diff rendering and syntax highlighting
 
 Patchflow is designed to run on the developer's machine. The initial product
 does not require an account, hosted service, Redis, PostgreSQL, Docker, or a
