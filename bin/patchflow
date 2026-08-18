@@ -1,0 +1,46 @@
+#!/usr/bin/env ruby
+
+require "optparse"
+require_relative "../config/environment"
+
+def main
+  command = ARGV.shift
+
+  case command
+  when "validate"
+    path = ARGV.shift
+    abort "Usage: bin/patchflow validate PATH/TO/review.yaml" unless path && ARGV.empty?
+
+    artifact = Patchflow::ReviewArtifact.load(File.expand_path(path))
+    puts "Valid Patchflow review #{artifact.id} (schema v#{artifact.data.fetch('schema_version')})"
+  when "create"
+    options = { base_ref: "main", target_ref: "HEAD" }
+    parser = OptionParser.new do |arguments|
+      arguments.banner = "Usage: bin/patchflow create --repository PATH [--base REF] [--target REF]"
+      arguments.on("--repository PATH", "Local Git repository") { |value| options[:repository_path] = value }
+      arguments.on("--base REF", "Base ref (default: main)") { |value| options[:base_ref] = value }
+      arguments.on("--target REF", "Target ref (default: HEAD)") { |value| options[:target_ref] = value }
+    end
+    parser.parse!(ARGV)
+    abort parser.to_s unless options[:repository_path]
+
+    repository = Patchflow::GitRepository.new(options.fetch(:repository_path))
+    artifact = Patchflow::ReviewCreator.new(
+      repository: repository,
+      base_ref: options.fetch(:base_ref),
+      target_ref: options.fetch(:target_ref)
+    ).create
+    puts repository.root.join(".patchflow/reviews", artifact.id)
+  else
+    abort <<~USAGE
+      Usage:
+        bin/patchflow create --repository PATH [--base REF] [--target REF]
+        bin/patchflow validate PATH/TO/review.yaml
+    USAGE
+  end
+rescue Patchflow::GitError, Patchflow::EmptyGitDiff, Patchflow::InvalidReviewArtifact, Patchflow::UnsafeReviewPath, OptionParser::ParseError => error
+  warn error.message
+  exit 1
+end
+
+main

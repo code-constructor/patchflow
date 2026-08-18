@@ -1,0 +1,55 @@
+<% if current_repository %>
+  <% content_for :title, "#{current_repository.name} · Patchflow" %>
+  <section class="row row--between">
+    <div>
+      <div class="eyebrow">Local repository</div>
+      <h2><%= current_repository.name %></h2>
+      <div class="repo-path"><%= current_repository.root %></div>
+    </div>
+    <div class="button-row">
+      <%= link_to "New review", new_review_path, class: "button" %>
+      <%= button_to "Close repository", repository_path, method: :delete, class: "button button--quiet" %>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Reviews</h2>
+    <% if @reviews.any? %>
+      <div class="review-list">
+        <% @reviews.each_with_index do |review, index| %>
+          <%= link_to review_path(review.id), class: "review-link" do %>
+            <span class="step-number"><%= index + 1 %></span>
+            <span>
+              <strong><%= review.change.fetch("title") %></strong><br>
+              <span class="small muted"><%= review.change.fetch("summary") %></span>
+            </span>
+            <span class="status"><%= review.status.humanize %></span>
+          <% end %>
+        <% end %>
+      </div>
+    <% else %>
+      <div class="card">
+        <p>No review artifacts found in this repository yet.</p>
+        <%= link_to "Create the first review", new_review_path, class: "button" %>
+      </div>
+    <% end %>
+  </section>
+<% else %>
+  <% content_for :title, "Patchflow · Understand the change" %>
+  <section class="hero">
+    <div class="eyebrow">Agent-guided code review</div>
+    <h1>Review code in the order that builds understanding.</h1>
+    <p class="lede">Patchflow turns a committed local Git diff into an explicit review plan and preserves the result as documentation in the reviewed repository.</p>
+  </section>
+
+  <section class="card narrow">
+    <h2>Open a repository</h2>
+    <%= form_with url: repository_path, class: "stack" do |form| %>
+      <%= form.label :repository_path do %>
+        Local path
+        <%= form.text_field :repository_path, value: @repository_path, required: true, autocomplete: "off" %>
+      <% end %>
+      <div><%= form.submit "Open repository", class: "button" %></div>
+    <% end %>
+  </section>
+<% end %>

@@ -20,10 +20,26 @@
 
     <%# Includes all stylesheet files in app/assets/stylesheets %>
     <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_include_tag "mermaid.standalone", "data-turbo-track": "reload" %>
     <%= javascript_importmap_tags %>
   </head>
 
   <body>
-    <%= yield %>
+    <header class="site-header">
+      <%= link_to root_path, class: "brand" do %>
+        <span class="brand-mark">P</span>
+        <span>Patchflow</span>
+      <% end %>
+      <% if current_repository %>
+        <span class="repository-chip"><%= current_repository.name %></span>
+      <% end %>
+    </header>
+
+    <main class="page-shell">
+      <% flash.each do |type, message| %>
+        <div class="flash flash--<%= type %>"><%= message %></div>
+      <% end %>
+      <%= yield %>
+    </main>
   </body>
 </html>

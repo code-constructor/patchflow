@@ -1,0 +1,65 @@
+<% content_for :title, "#{@step.fetch('title')} · Patchflow" %>
+<div class="breadcrumb"><%= link_to "← Review overview", review_path(@artifact.id) %></div>
+
+<section class="row row--between">
+  <div>
+    <div class="eyebrow">Step <%= @step_index + 1 %> of <%= @artifact.steps.length %></div>
+    <h2><%= @step.fetch("title") %></h2>
+    <p class="lede"><%= @step.fetch("rationale") %></p>
+  </div>
+  <span class="priority priority--<%= @step.fetch('priority') %>"><%= @step.fetch("priority") %> priority</span>
+</section>
+
+<% @diffs.each do |path, diff| %>
+  <section class="section card">
+    <h3><%= path %></h3>
+
+    <% annotations_for(@artifact, scope: "file", file_path: path).each do |annotation| %>
+      <div class="annotation section"><span class="small muted">File note</span><p><%= annotation.fetch("body") %></p></div>
+    <% end %>
+    <% annotations_for(@artifact, scope: "line", file_path: path).each do |annotation| %>
+      <div class="annotation section">
+        <span class="small muted"><%= annotation.fetch("side") %> line <%= annotation.fetch("start_line") %><%= "–#{annotation['end_line']}" if annotation["end_line"] && annotation["end_line"] != annotation["start_line"] %></span>
+        <p><%= annotation.fetch("body") %></p>
+      </div>
+    <% end %>
+
+    <div class="diff-block">
+      <div class="diff-header"><%= path %></div>
+      <pre class="diff"><%= diff.presence || "No textual diff available for this path." %></pre>
+    </div>
+
+    <%= form_with url: review_annotations_path(@artifact.id), class: "stack annotation-form" do |form| %>
+      <%= form.hidden_field :step_id, value: @step.fetch("id") %>
+      <%= form.hidden_field "annotation[file_path]", value: path %>
+      <div class="line-fields">
+        <%= form.label "annotation[scope]" do %>
+          Annotation type
+          <%= form.select "annotation[scope]", [["File", "file"], ["Line or range", "line"]] %>
+        <% end %>
+        <%= form.label "annotation[side]" do %>
+          Diff side
+          <%= form.select "annotation[side]", [["Target", "target"], ["Base", "base"]], include_blank: "Not a line note" %>
+        <% end %>
+        <%= form.label "annotation[start_line]" do %>
+          Start line
+          <%= form.number_field "annotation[start_line]", min: 1 %>
+        <% end %>
+      </div>
+      <%= form.label "annotation[end_line]" do %>
+        End line (optional)
+        <%= form.number_field "annotation[end_line]", min: 1 %>
+      <% end %>
+      <%= form.label "annotation[body]" do %>
+        Note
+        <%= form.text_area "annotation[body]", required: true %>
+      <% end %>
+      <div><%= form.submit "Save annotation", class: "button button--small" %></div>
+    <% end %>
+  </section>
+<% end %>
+
+<nav class="step-nav">
+  <div><%= link_to "← #{@previous_step.fetch('title')}", review_step_path(@artifact.id, @previous_step.fetch("id")), class: "button button--quiet" if @previous_step %></div>
+  <div><%= link_to "#{@next_step.fetch('title')} →", review_step_path(@artifact.id, @next_step.fetch("id")), class: "button" if @next_step %></div>
+</nav>

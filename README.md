@@ -15,8 +15,8 @@ inside the reviewed repository so they can be committed alongside the code and
 understood later.
 
 > [!NOTE]
-> Patchflow is in early development. This repository currently contains the
-> Rails foundation; the first end-to-end review workflow is the next milestone.
+> Patchflow is in early development. The first local end-to-end review workflow
+> is available, but its artifact schema and user experience are still evolving.
 
 ## Why Patchflow?
 
@@ -45,7 +45,7 @@ describing different code.
 
 ## Review artifacts
 
-The planned repository-local convention is:
+The repository-local convention is:
 
 ```text
 .patchflow/reviews/<review-id>/
@@ -55,13 +55,13 @@ The planned repository-local convention is:
   assets/
 ```
 
-`review.yaml` is the machine-readable source of truth. It will contain the
+`review.yaml` is the machine-readable source of truth. It contains the
 schema version, immutable source refs, change summary, ordered review steps,
 priority rationales, annotations, decisions, and review status. Markdown and
 Mermaid source remain part of the artifact instead of existing only as rendered
 UI state.
 
-Generated `.patchflow` artifacts will be excluded from the diff under review by
+Generated `.patchflow` artifacts are excluded from the diff under review by
 default, preventing Patchflow from reviewing its own output.
 
 ## First usable version
@@ -113,6 +113,34 @@ bin/dev
 ```
 
 The development server is available at <http://localhost:3000> by default.
+
+## Try the review workflow
+
+Open Patchflow, select a local Git repository, and create a review from a base
+ref such as `main` to a committed target such as `HEAD`. Patchflow resolves the
+merge base and target SHA, creates a baseline review plan, and writes the result
+to the selected repository.
+
+The same workflow is available from the command line:
+
+```sh
+bin/patchflow create \
+  --repository /absolute/path/to/repository \
+  --base main \
+  --target HEAD
+```
+
+Validate an existing artifact with:
+
+```sh
+bin/patchflow validate \
+  /absolute/path/to/repository/.patchflow/reviews/<review-id>/review.yaml
+```
+
+The repository also contains the Coding Agent skill
+`create-patchflow-review` under `.agents/skills/`. It can analyze the committed
+diff and enrich the baseline summary, review order, rationales, and Mermaid
+documentation while preserving the recorded source SHAs.
 
 ## Verification
 

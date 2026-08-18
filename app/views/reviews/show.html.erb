@@ -1,0 +1,64 @@
+<% content_for :title, "#{@artifact.change.fetch('title')} · Patchflow" %>
+<div class="breadcrumb"><%= link_to "← #{current_repository.name}", root_path %></div>
+
+<section class="row row--between">
+  <div>
+    <div class="eyebrow">Review overview</div>
+    <h2><%= @artifact.change.fetch("title") %></h2>
+    <p class="muted"><%= @artifact.change.fetch("summary") %></p>
+  </div>
+  <span class="status"><%= @artifact.status.humanize %></span>
+</section>
+
+<% if @stale %>
+  <p class="warning">The target ref no longer points at this artifact's target SHA. This review is stale evidence for the current branch.</p>
+<% end %>
+
+<dl class="metadata section">
+  <div><dt>Base</dt><dd class="sha" title="<%= @artifact.source.fetch('base_sha') %>"><%= short_sha(@artifact.source.fetch("base_sha")) %></dd></div>
+  <div><dt>Target</dt><dd class="sha" title="<%= @artifact.source.fetch('target_sha') %>"><%= short_sha(@artifact.source.fetch("target_sha")) %></dd></div>
+  <div><dt>Artifact</dt><dd class="sha"><%= @artifact.id %></dd></div>
+</dl>
+
+<section class="section grid-two">
+  <article class="card">
+    <h2>Change explanation</h2>
+    <div data-controller="review-document">
+      <pre class="markdown-source" data-review-document-target="source"><%= @overview %></pre>
+      <div class="markdown" data-review-document-target="output"></div>
+    </div>
+  </article>
+
+  <aside class="card">
+    <h2>Overview annotations</h2>
+    <div class="annotation-list">
+      <% annotations_for(@artifact, scope: "overview").each do |annotation| %>
+        <div class="annotation"><span class="small muted"><%= annotation.fetch("created_at") %></span><p><%= annotation.fetch("body") %></p></div>
+      <% end %>
+    </div>
+    <%= form_with url: review_annotations_path(@artifact.id), class: "stack annotation-form" do |form| %>
+      <%= form.hidden_field "annotation[scope]", value: "overview" %>
+      <%= form.label "annotation[body]" do %>
+        Add a note
+        <%= form.text_area "annotation[body]", required: true %>
+      <% end %>
+      <div><%= form.submit "Save annotation", class: "button button--small" %></div>
+    <% end %>
+  </aside>
+</section>
+
+<section class="section">
+  <h2>Review plan</h2>
+  <div class="step-list">
+    <% @artifact.steps.each_with_index do |step, index| %>
+      <%= link_to review_step_path(@artifact.id, step.fetch("id")), class: "step-link" do %>
+        <span class="step-number"><%= index + 1 %></span>
+        <span>
+          <strong><%= step.fetch("title") %></strong><br>
+          <span class="small muted"><%= step.fetch("rationale") %></span>
+        </span>
+        <span class="priority priority--<%= step.fetch('priority') %>"><%= step.fetch("priority") %></span>
+      <% end %>
+    <% end %>
+  </div>
+</section>
