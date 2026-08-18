@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Idiomatic Go"
+  short_description: "Build clear, safe, maintainable Go code"
+  default_prompt: "Use $write-idiomatic-go to implement this Go change idiomatically and verify it."
