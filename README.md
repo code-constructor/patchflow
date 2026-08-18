@@ -191,6 +191,21 @@ tests, and a production build:
 bin/ci
 ```
 
+## Code documentation
+
+Every named Go function and method—including internal helpers and tests—has a
+Go Doc comment that explains its purpose, contract, or important side effects.
+Generate the complete package reference directly from the source with:
+
+```sh
+bin/docs
+```
+
+Pass an import path to inspect one package, for example
+`bin/docs github.com/traqx-ai/patchflow/internal/gitrepo`. The CI pipeline checks
+both the documentation convention and the documentation command, so new
+undocumented functions cannot enter unnoticed.
+
 ## Design constraints
 
 - **Local first:** network-backed features require an explicit product decision.

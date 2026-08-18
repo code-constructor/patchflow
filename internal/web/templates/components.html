@@ -30,6 +30,20 @@
       {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}<div class="code-excerpt">{{range .CodeLines}}<div class="code-excerpt__line"><span class="code-excerpt__number">{{.Number}}</span><code>{{.HTML}}</code></div>{{end}}</div>{{end}}
     </section>
   {{else if eq .Type "diagram"}}
-    <section class="review-block card" id="{{.ID}}"><div class="eyebrow">Diagram</div>{{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}{{template "markdown" .DiagramMarkdown}}{{end}}</section>
+    <section class="review-block card diagram-card" id="{{.ID}}" data-controller="diagram-viewer" data-action="click->diagram-viewer#expand">
+      <header class="diagram-card__header">
+        <div class="eyebrow">Diagram</div>
+        {{if not .Error}}<button type="button" class="diagram-expand" aria-label="Open diagram in fullscreen"><span aria-hidden="true">⛶</span> Expand</button>{{end}}
+      </header>
+      {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}{{template "markdown" .DiagramMarkdown}}{{end}}
+      {{if not .Error}}
+        <dialog class="diagram-dialog" data-diagram-viewer-target="dialog" data-action="click->diagram-viewer#dismiss close->diagram-viewer#restore">
+          <div class="diagram-dialog__surface">
+            <header class="diagram-dialog__header"><div><div class="eyebrow">Diagram</div><strong>{{.Path}}</strong></div><button type="button" class="diagram-dialog__close" data-action="diagram-viewer#close" aria-label="Close fullscreen diagram">×</button></header>
+            <div class="diagram-dialog__canvas" data-diagram-viewer-target="canvas"></div>
+          </div>
+        </dialog>
+      {{end}}
+    </section>
   {{end}}
 {{end}}

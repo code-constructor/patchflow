@@ -25,6 +25,7 @@ var categories = []category{
 	{"supporting", "Review supporting changes", "low", "These files support the change but do not match a more important execution or domain path.", regexp.MustCompile(`.*`)},
 }
 
+// GeneratePlan groups every changed file into an ordered structural review baseline.
 func GeneratePlan(files []artifact.ChangedFile) []artifact.Step {
 	remaining := make([]string, len(files))
 	for i, file := range files {

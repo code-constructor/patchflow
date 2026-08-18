@@ -25,6 +25,7 @@ var embedded embed.FS
 
 const repositoryCookie = "patchflow_repository"
 
+// App is Patchflow's dependency container and HTTP handler.
 type App struct {
 	templates         map[string]*template.Template
 	assets            http.Handler
@@ -33,6 +34,7 @@ type App struct {
 	logger            *slog.Logger
 }
 
+// Page contains the shared and route-specific data rendered by the layout.
 type Page struct {
 	Title          string
 	RepositoryName string
@@ -47,14 +49,24 @@ type Page struct {
 	Chapter        *ChapterView
 	PickerRoot     string
 }
+
+// RepositoryView is the selected repository summary shown in the UI.
 type RepositoryView struct{ Name, Path string }
+
+// ReviewListItem is the compact representation used by the home-page review list.
 type ReviewListItem struct{ ID, Title, Summary, Status string }
+
+// ReviewView is the overview page model for one stored review.
 type ReviewView struct {
 	ID, Title, Summary, Status, BaseSHA, TargetSHA, Overview string
 	Stale                                                    bool
 	Steps                                                    []StepLink
 }
+
+// StepLink is a navigable chapter summary.
 type StepLink struct{ ID, Title, Rationale, Priority string }
+
+// ChapterView contains one resolved review step and its neighboring navigation.
 type ChapterView struct {
 	ReviewID                   string
 	Number, Total              int
@@ -62,26 +74,35 @@ type ChapterView struct {
 	Blocks                     []BlockView
 	Previous, Next             *StepLink
 }
+
+// BlockView contains a narrative block plus any resolved source evidence or error.
 type BlockView struct {
 	ID, Type, Body, Kind, Path, View, Source, SourceSide, Error, Focus, Highlights, DiagramMarkdown string
 	StartLine, EndLine                                                                              int
 	CodeLines                                                                                       []CodeLine
 }
+
+// CodeLine is one numbered source line with trusted server-generated highlighting.
 type CodeLine struct {
 	Number int
 	HTML   template.HTML
 }
+
+// RepositoryPickerView describes one directory level inside the browse boundary.
 type RepositoryPickerView struct {
 	Root, Current, Parent string
 	CurrentIsRepository   bool
 	Entries               []DirectoryView
 	Error                 string
 }
+
+// DirectoryView represents one selectable or navigable child directory.
 type DirectoryView struct {
 	Name, Path   string
 	IsRepository bool
 }
 
+// NewApp parses embedded templates and assembles the local HTTP application.
 func NewApp(defaultRepository string, logger *slog.Logger) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -123,6 +144,7 @@ func NewApp(defaultRepository string, logger *slog.Logger) (*App, error) {
 	return &App{templates: templates, assets: http.StripPrefix("/assets/", http.FileServer(http.FS(assetFS))), defaultRepository: defaultRepository, browseRoot: discoverBrowseRoot(defaultRepository), logger: logger}, nil
 }
 
+// ServeHTTP applies security headers and dispatches Patchflow's small route set.
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.securityHeaders(w)
 	if strings.HasPrefix(r.URL.Path, "/assets/") {
@@ -157,6 +179,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// home renders repository selection or the selected repository's review list.
 func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	page := Page{Title: "Patchflow · Understand the change", RepositoryPath: a.defaultRepository, PickerRoot: a.browseRoot, Notice: r.URL.Query().Get("notice"), Alert: r.URL.Query().Get("alert")}
 	repository, err := a.currentRepository(r)
@@ -184,6 +207,7 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	a.render(w, "home", page, http.StatusOK)
 }
 
+// repositoryPicker renders one safely bounded directory level into a Turbo Frame.
 func (a *App) repositoryPicker(w http.ResponseWriter, r *http.Request) {
 	view, err := browseDirectories(a.browseRoot, r.URL.Query().Get("path"))
 	status := http.StatusOK
@@ -194,6 +218,7 @@ func (a *App) repositoryPicker(w http.ResponseWriter, r *http.Request) {
 	a.renderPartial(w, "repository_picker", "repository_picker", view, status)
 }
 
+// openRepository validates a submitted path and remembers its canonical Git root.
 func (a *App) openRepository(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		a.render(w, "home", Page{Title: "Patchflow", Alert: "Invalid form submission"}, http.StatusUnprocessableEntity)
@@ -208,11 +233,13 @@ func (a *App) openRepository(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, "/reviews/new", "notice", "Opened "+repository.Name()+".")
 }
 
+// closeRepository forgets the local repository selection and returns home.
 func (a *App) closeRepository(w http.ResponseWriter, r *http.Request) {
 	clearRepositoryCookie(w)
 	redirect(w, r, "/", "notice", "Repository closed.")
 }
 
+// newReview renders the form for choosing a committed Git comparison.
 func (a *App) newReview(w http.ResponseWriter, r *http.Request) {
 	repository, ok := a.requireRepository(w, r)
 	if !ok {
@@ -229,6 +256,7 @@ func (a *App) newReview(w http.ResponseWriter, r *http.Request) {
 	a.render(w, "new", Page{Title: "New review · Patchflow", RepositoryName: repository.Name(), BaseRef: baseRef, TargetRef: targetRef, Alert: r.URL.Query().Get("alert")}, http.StatusOK)
 }
 
+// createReview delegates artifact creation and redirects to the resulting overview.
 func (a *App) createReview(w http.ResponseWriter, r *http.Request) {
 	repository, ok := a.requireRepository(w, r)
 	if !ok {
@@ -252,6 +280,7 @@ func (a *App) createReview(w http.ResponseWriter, r *http.Request) {
 	a.render(w, "new", Page{Title: "New review · Patchflow", RepositoryName: repository.Name(), BaseRef: baseRef, TargetRef: targetRef, Alert: err.Error()}, http.StatusUnprocessableEntity)
 }
 
+// overview loads one review, detects staleness, and renders its ordered plan.
 func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 	repository, ok := a.requireRepository(w, r)
 	if !ok {
@@ -283,6 +312,7 @@ func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 	a.render(w, "overview", Page{Title: view.Title + " · Patchflow", RepositoryName: repository.Name(), Notice: r.URL.Query().Get("notice"), Review: &view}, http.StatusOK)
 }
 
+// chapter resolves an artifact step into renderable prose, code, diff, and diagram blocks.
 func (a *App) chapter(w http.ResponseWriter, r *http.Request) {
 	repository, ok := a.requireRepository(w, r)
 	if !ok {
@@ -334,6 +364,7 @@ func (a *App) chapter(w http.ResponseWriter, r *http.Request) {
 	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", RepositoryName: repository.Name(), Chapter: &chapter}, http.StatusOK)
 }
 
+// buildBlock joins a declarative artifact block with evidence from its recorded commits.
 func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, files map[string]artifact.ChangedFile, block artifact.Block) BlockView {
 	view := BlockView{ID: block.ID, Type: block.Type, Body: block.Body, Kind: block.Kind, Path: block.Path, View: defaultString(block.View, "split"), SourceSide: block.Source, StartLine: block.StartLine, EndLine: block.EndLine}
 	switch block.Type {
@@ -375,6 +406,7 @@ func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored
 	return view
 }
 
+// legacyBlocks adapts a v1 file-oriented step into the v2 chapter rendering model.
 func legacyBlocks(step artifact.Step) []artifact.Block {
 	blocks := []artifact.Block{{ID: step.ID + "-intro", Type: "prose", Body: step.Rationale}}
 	for index, path := range step.Files {
@@ -383,6 +415,7 @@ func legacyBlocks(step artifact.Step) []artifact.Block {
 	return blocks
 }
 
+// currentRepository restores the selected repository from defaults or the local cookie.
 func (a *App) currentRepository(r *http.Request) (*gitrepo.Repository, error) {
 	path := a.defaultRepository
 	if cookie, err := r.Cookie(repositoryCookie); err == nil {
@@ -395,6 +428,8 @@ func (a *App) currentRepository(r *http.Request) (*gitrepo.Repository, error) {
 	}
 	return gitrepo.Open(path)
 }
+
+// requireRepository redirects requests that need a repository when none is available.
 func (a *App) requireRepository(w http.ResponseWriter, r *http.Request) (*gitrepo.Repository, bool) {
 	repository, err := a.currentRepository(r)
 	if err != nil || repository == nil {
@@ -408,6 +443,7 @@ func (a *App) requireRepository(w http.ResponseWriter, r *http.Request) (*gitrep
 	return repository, true
 }
 
+// render writes a complete HTML page and converts template failures to HTTP errors.
 func (a *App) render(w http.ResponseWriter, name string, page Page, status int) {
 	var buffer bytes.Buffer
 	if err := a.templates[name].ExecuteTemplate(&buffer, "layout", page); err != nil {
@@ -420,6 +456,7 @@ func (a *App) render(w http.ResponseWriter, name string, page Page, status int) 
 	_, _ = buffer.WriteTo(w)
 }
 
+// renderPartial writes a named fragment for progressive Turbo updates.
 func (a *App) renderPartial(w http.ResponseWriter, name, templateName string, value any, status int) {
 	var buffer bytes.Buffer
 	if err := a.templates[name].ExecuteTemplate(&buffer, templateName, value); err != nil {
@@ -431,34 +468,49 @@ func (a *App) renderPartial(w http.ResponseWriter, name, templateName string, va
 	w.WriteHeader(status)
 	_, _ = buffer.WriteTo(w)
 }
+
+// securityHeaders sets the browser policy for embedded local assets and scripts.
 func (a *App) securityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 }
+
+// setRepositoryCookie stores an encoded local path without exposing it to scripts.
 func setRepositoryCookie(w http.ResponseWriter, path string) {
 	http.SetCookie(w, &http.Cookie{Name: repositoryCookie, Value: base64.RawURLEncoding.EncodeToString([]byte(path)), Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }
+
+// clearRepositoryCookie expires the current local repository selection.
 func clearRepositoryCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{Name: repositoryCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }
+
+// redirect appends a short flash message and sends a See Other response.
 func redirect(w http.ResponseWriter, r *http.Request, path, key, message string) {
 	if message != "" {
 		path += "?" + key + "=" + url.QueryEscape(message)
 	}
 	http.Redirect(w, r, path, http.StatusSeeOther)
 }
+
+// defaultString returns fallback only when value is empty.
 func defaultString(value, fallback string) string {
 	if value == "" {
 		return fallback
 	}
 	return value
 }
+
+// humanize converts an underscore-separated status into a display label.
 func humanize(value string) string { return strings.Title(strings.ReplaceAll(value, "_", " ")) }
+
+// matchPath extracts one path segment after a fixed route prefix.
 func matchPath(path, prefix, separator string) bool {
 	return strings.HasPrefix(path, prefix) && strings.Contains(strings.TrimPrefix(path, prefix), separator)
 }
 
+// discoverBrowseRoot chooses the narrowest useful root for the repository picker.
 func discoverBrowseRoot(defaultRepository string) string {
 	if defaultRepository != "" {
 		if repository, err := gitrepo.Open(defaultRepository); err == nil {
@@ -479,6 +531,7 @@ func discoverBrowseRoot(defaultRepository string) string {
 	return workingDirectory
 }
 
+// projectsDirectory returns $HOME/Projects when it exists as a directory.
 func projectsDirectory() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -487,6 +540,7 @@ func projectsDirectory() string {
 	return filepath.Join(home, "Projects")
 }
 
+// browseDirectories lists safe child directories without following escapes outside root.
 func browseDirectories(root, requested string) (RepositoryPickerView, error) {
 	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
@@ -536,11 +590,13 @@ func browseDirectories(root, requested string) (RepositoryPickerView, error) {
 	return view, nil
 }
 
+// isRepositoryRoot reports whether a directory contains Git metadata.
 func isRepositoryRoot(path string) bool {
 	_, err := os.Stat(filepath.Join(path, ".git"))
 	return err == nil
 }
 
+// pathInside reports whether candidate remains within the picker root.
 func pathInside(root, candidate string) bool {
 	relative, err := filepath.Rel(root, candidate)
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)

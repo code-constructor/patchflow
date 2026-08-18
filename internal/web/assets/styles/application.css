@@ -157,6 +157,21 @@ textarea { min-height: 92px; resize: vertical; }
 .markdown-source[data-rendered="true"] { display: none; }
 .mermaid-diagram { margin: 20px 0; overflow-x: auto; text-align: center; }
 .mermaid-error { padding: 12px; border-radius: 8px; color: var(--danger); background: #fae2e2; }
+.diagram-card__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.diagram-card .mermaid-diagram { cursor: zoom-in; }
+.diagram-expand { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--accent); background: #f7f9f6; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
+.diagram-expand:hover { border-color: #aab9ad; background: var(--accent-soft); }
+.diagram-dialog { width: calc(100vw - 32px); height: calc(100vh - 32px); max-width: none; max-height: none; padding: 0; border: 0; border-radius: 16px; color: var(--ink); background: var(--surface); box-shadow: 0 24px 80px rgba(20, 32, 24, .35); }
+.diagram-dialog::backdrop { background: rgba(16, 25, 19, .72); backdrop-filter: blur(4px); }
+.diagram-dialog__surface { height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.diagram-dialog__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; border-bottom: 1px solid var(--line); }
+.diagram-dialog__header strong { display: block; margin-top: 3px; font-size: 14px; }
+.diagram-dialog__close { width: 38px; height: 38px; border: 0; border-radius: 50%; color: var(--muted); background: #eef1ec; font-size: 26px; line-height: 1; cursor: pointer; }
+.diagram-dialog__close:hover { color: var(--ink); background: #e2e7e1; }
+.diagram-dialog__canvas { min-height: 0; display: grid; place-items: center; overflow: auto; padding: 28px; }
+.diagram-dialog__canvas .mermaid-diagram { width: 100%; margin: 0; overflow: visible; cursor: default; }
+.diagram-dialog__canvas svg { display: block; width: max(100%, 1200px) !important; max-width: none !important; height: auto; }
+.is-diagram-open { overflow: hidden; }
 .diff-viewer { margin-top: 18px; border: 1px solid #d0d7de; border-radius: 10px; overflow: hidden; background: white; }
 .diff-toolbar { display: flex; justify-content: flex-end; gap: 4px; padding: 8px; border-bottom: 1px solid #d8dee4; background: #f6f8fa; }
 .diff-mode-button { padding: 6px 10px; border: 1px solid transparent; border-radius: 6px; color: #57606a; background: transparent; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
@@ -194,7 +209,7 @@ textarea { min-height: 92px; resize: vertical; }
 .annotation-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 .review-chapter { width: min(100%, 980px); margin-inline: auto; }
 .review-block + .review-block { margin-top: 30px; }
-.review-block--prose { width: min(760px, 100%); margin-inline: auto; font-size: 17px; }
+.review-block--prose { width: 100%; font-size: 17px; }
 .callout, .review-question { width: min(820px, 100%); margin-inline: auto; padding: 18px 20px; border-radius: 12px; }
 .callout { border-left: 4px solid var(--accent); background: var(--accent-soft); }
 .callout--risk, .callout--warning, .callout--uncertainty { border-left-color: var(--warning); background: var(--warning-soft); }
@@ -204,9 +219,9 @@ textarea { min-height: 92px; resize: vertical; }
 .code-card__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
 .focus-label { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 .code-card .diff-viewer { margin-top: 0; border: 0; border-radius: 0; }
-.code-excerpt { overflow-x: auto; padding: 8px 0; color: var(--code-ink); background: var(--code); font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code-excerpt { overflow-x: auto; padding: 8px 0; color: #24292f; background: #f6f8fa; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .code-excerpt__line { display: grid; grid-template-columns: 64px max-content; min-height: 20px; }
-.code-excerpt__number { padding: 0 14px; color: #829189; text-align: right; user-select: none; }
+.code-excerpt__number { padding: 0 14px; color: #6e7781; text-align: right; user-select: none; }
 .code-excerpt code { padding-right: 20px; white-space: pre; }
 .line-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .breadcrumb { margin-bottom: 20px; color: var(--muted); font-size: 13px; }

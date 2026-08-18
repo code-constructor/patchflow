@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestSharedV2Fixtures keeps the Go validator aligned with documented valid and invalid examples.
 func TestSharedV2Fixtures(t *testing.T) {
 	validator, err := NewValidator()
 	if err != nil {
@@ -45,6 +46,7 @@ func TestSharedV2Fixtures(t *testing.T) {
 	}
 }
 
+// TestDocumentedV1FixtureRemainsReadable protects the promised legacy read path.
 func TestDocumentedV1FixtureRemainsReadable(t *testing.T) {
 	validator, err := NewValidator()
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"testing"
 )
 
+// TestAppRunsRepositoryToChapterFlow exercises repository selection through chapter rendering.
 func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	repository := featureRepository(t)
 	app, err := NewApp(repository, nil)
@@ -46,11 +47,16 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 
 	asset := perform(app, http.MethodGet, "/assets/application.js", "")
-	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") {
+	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") || !strings.Contains(asset.Body.String(), "diagram-viewer") {
 		t.Fatalf("embedded asset unavailable: %d", asset.Code)
+	}
+	diagramController := perform(app, http.MethodGet, "/assets/controllers/diagram_viewer_controller.js", "")
+	if diagramController.Code != http.StatusOK || !strings.Contains(diagramController.Body.String(), "showModal") {
+		t.Fatalf("diagram viewer controller unavailable: %d", diagramController.Code)
 	}
 }
 
+// TestRepositoryPickerListsGitRepositoriesAndRejectsEscapes covers picker discovery and containment.
 func TestRepositoryPickerListsGitRepositoriesAndRejectsEscapes(t *testing.T) {
 	repository := featureRepository(t)
 	app, err := NewApp(repository, nil)
@@ -74,6 +80,7 @@ func TestRepositoryPickerListsGitRepositoriesAndRejectsEscapes(t *testing.T) {
 	}
 }
 
+// TestBrowseDirectoriesSkipsSymlinksOutsideRoot hides children that resolve beyond the browse root.
 func TestBrowseDirectoriesSkipsSymlinksOutsideRoot(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
@@ -89,6 +96,7 @@ func TestBrowseDirectoriesSkipsSymlinksOutsideRoot(t *testing.T) {
 	}
 }
 
+// TestAppRendersLegacyV1AsChapterBlocks verifies the in-memory v1 presentation adapter.
 func TestAppRendersLegacyV1AsChapterBlocks(t *testing.T) {
 	repository := featureRepository(t)
 	source, err := os.ReadFile(filepath.Join("..", "..", "docs", "examples", "review.yaml"))
@@ -120,6 +128,7 @@ func TestAppRendersLegacyV1AsChapterBlocks(t *testing.T) {
 	}
 }
 
+// TestDiffHighlightingProducesLineMaps verifies syntax spans for both sides of a patch.
 func TestDiffHighlightingProducesLineMaps(t *testing.T) {
 	diff := "@@ -1 +1 @@\n-package old\n+package main\n"
 	highlights := highlightDiffJSON("main.go", diff)
@@ -130,6 +139,38 @@ func TestDiffHighlightingProducesLineMaps(t *testing.T) {
 	}
 }
 
+// TestDiffHighlightingHandlesOneSidedFiles covers Git hunks with a zero line on the empty side.
+func TestDiffHighlightingHandlesOneSidedFiles(t *testing.T) {
+	tests := []struct {
+		name       string
+		diff       string
+		expected   string
+		unexpected string
+	}{
+		{name: "added", diff: "@@ -0,0 +1,2 @@\n+package main\n+func run() {}\n", expected: `"new":{"1"`, unexpected: `"old":{"1"`},
+		{name: "deleted", diff: "@@ -1,2 +0,0 @@\n-package main\n-func run() {}\n", expected: `"old":{"1"`, unexpected: `"new":{"1"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			highlights := highlightDiffJSON("main.go", test.diff)
+			if !strings.Contains(highlights, test.expected) || strings.Contains(highlights, test.unexpected) {
+				t.Fatalf("unexpected one-sided highlight map: %s", highlights)
+			}
+		})
+	}
+}
+
+// TestSourceHighlightingUsesGitHubPalette keeps source excerpts and diffs visibly tokenized.
+func TestSourceHighlightingUsesGitHubPalette(t *testing.T) {
+	highlighted := string(highlightLine("main.go", "func run() string"))
+	for _, expected := range []string{"color:#cf222e", "color:#6639ba"} {
+		if !strings.Contains(highlighted, expected) {
+			t.Fatalf("source highlighting is missing GitHub token color %s: %s", expected, highlighted)
+		}
+	}
+}
+
+// perform sends one in-memory request through the HTTP application.
 func perform(handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	if method == http.MethodPost {
@@ -140,6 +181,7 @@ func perform(handler http.Handler, method, path, body string) *httptest.Response
 	return response
 }
 
+// featureRepository creates a small two-commit repository used by HTTP flows.
 func featureRepository(t *testing.T) string {
 	t.Helper()
 	directory := t.TempDir()
@@ -158,6 +200,8 @@ func featureRepository(t *testing.T) string {
 	git(t, directory, "commit", "-m", "Add account locking")
 	return directory
 }
+
+// git executes a fixture command and returns its trimmed standard output.
 func git(t *testing.T, directory string, arguments ...string) string {
 	t.Helper()
 	command := exec.Command("git", append([]string{"-C", directory}, arguments...)...)
@@ -167,6 +211,8 @@ func git(t *testing.T, directory string, arguments ...string) string {
 	}
 	return strings.TrimSpace(string(output))
 }
+
+// write creates parent directories and writes one web test fixture file.
 func write(t *testing.T, root, relative, content string) {
 	t.Helper()
 	path := filepath.Join(root, relative)

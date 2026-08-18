@@ -5,6 +5,7 @@ import { marked } from "marked"
 export default class extends Controller {
   static targets = ["source", "output"]
 
+  /** Converts stored Markdown into sanitized HTML when the block connects. */
   async connect() {
     const renderedMarkdown = marked.parse(this.sourceTarget.textContent, {
       gfm: true,
@@ -15,6 +16,7 @@ export default class extends Controller {
     await this.renderMermaidDiagrams()
   }
 
+  /** Replaces Mermaid code fences with strict, sanitized SVG diagrams. */
   async renderMermaidDiagrams() {
     if (!globalThis.mermaid) return
 

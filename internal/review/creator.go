@@ -10,12 +10,14 @@ import (
 	"github.com/traqx-ai/patchflow/internal/gitrepo"
 )
 
+// Creator turns a committed Git comparison into a stored baseline review.
 type Creator struct {
 	Repository *gitrepo.Repository
 	Store      *Store
 	Now        func() time.Time
 }
 
+// Create resolves refs once, builds a complete baseline plan, and persists it.
 func (c *Creator) Create(baseRef, targetRef string) (*Stored, error) {
 	requestedBase, err := c.Repository.ResolveCommit(baseRef)
 	if err != nil {
@@ -47,6 +49,7 @@ func (c *Creator) Create(baseRef, targetRef string) (*Stored, error) {
 	return c.Store.Create(value, overview(value))
 }
 
+// overview renders the human-readable introduction beside a baseline artifact.
 func overview(value *artifact.Review) string {
 	lines := []string{"# " + value.Change.Title, "", value.Change.Summary, "", "This baseline plan was generated from repository structure. Ask a Coding Agent to enrich the summary, rationale, and ordering before relying on it for a final review.", "", "## Review plan", ""}
 	for index, step := range value.Steps {
@@ -55,6 +58,7 @@ func overview(value *artifact.Review) string {
 	return strings.Join(append(lines, ""), "\n")
 }
 
+// randomSuffix adds collision resistance to timestamp-based review IDs.
 func randomSuffix() string {
 	var value [2]byte
 	if _, err := rand.Read(value[:]); err != nil {
@@ -62,6 +66,8 @@ func randomSuffix() string {
 	}
 	return fmt.Sprintf("%x", value)
 }
+
+// plural selects a singular or plural label for generated prose.
 func plural(count int, singular, plural string) string {
 	if count == 1 {
 		return singular

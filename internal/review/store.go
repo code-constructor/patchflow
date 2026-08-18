@@ -17,22 +17,31 @@ const artifactDirectory = ".patchflow/reviews"
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
+// Store owns safe persistence beneath a repository's .patchflow directory.
 type Store struct {
 	root      string
 	validator *artifact.Validator
 }
+
+// Stored couples a parsed review with its canonical review.yaml path.
 type Stored struct {
 	Review *artifact.Review
 	Path   string
 }
+
+// NotFoundError reports an absent review or review asset.
 type NotFoundError struct{ Message string }
 
+// Error returns the user-facing missing-artifact message.
 func (e *NotFoundError) Error() string { return e.Message }
 
+// UnsafePathError reports a path that crosses an artifact trust boundary.
 type UnsafePathError struct{ Message string }
 
+// Error returns the user-facing artifact path-safety failure.
 func (e *UnsafePathError) Error() string { return e.Message }
 
+// NewStore anchors artifact operations to a canonical repository root.
 func NewStore(repositoryRoot string, validator *artifact.Validator) (*Store, error) {
 	realRoot, err := filepath.EvalSymlinks(repositoryRoot)
 	if err != nil {
@@ -47,6 +56,7 @@ func NewStore(repositoryRoot string, validator *artifact.Validator) (*Store, err
 	return &Store{root: realRoot, validator: validator}, nil
 }
 
+// All returns valid reviews ordered from newest to oldest.
 func (s *Store) All() ([]Stored, error) {
 	root, err := s.safeDirectory(filepath.Join(s.root, artifactDirectory), false)
 	if errors.Is(err, os.ErrNotExist) {
@@ -73,6 +83,7 @@ func (s *Store) All() ([]Stored, error) {
 	return result, nil
 }
 
+// Find loads and validates one review without following escapes outside its directory.
 func (s *Store) Find(id string) (*Stored, error) {
 	directory, err := s.safeReviewDirectory(id, false)
 	if err != nil {
@@ -97,6 +108,7 @@ func (s *Store) Find(id string) (*Stored, error) {
 	return &Stored{Review: parsed, Path: realPath}, nil
 }
 
+// Create validates and atomically writes the files that make up a new review.
 func (s *Store) Create(value *artifact.Review, overview string) (*Stored, error) {
 	serialized, err := yaml.Marshal(value)
 	if err != nil {
@@ -122,6 +134,7 @@ func (s *Store) Create(value *artifact.Review, overview string) (*Stored, error)
 	return s.Find(value.ID)
 }
 
+// ReadOverview loads the overview declared by a stored review.
 func (s *Store) ReadOverview(stored *Stored) (string, error) {
 	content, err := s.ReadAsset(stored, stored.Review.OverviewPath)
 	if err != nil {
@@ -130,6 +143,7 @@ func (s *Store) ReadOverview(stored *Stored) (string, error) {
 	return content, nil
 }
 
+// ReadAsset safely reads a regular file located inside one review directory.
 func (s *Store) ReadAsset(stored *Stored, relative string) (string, error) {
 	directory, err := s.safeReviewDirectory(stored.Review.ID, false)
 	if err != nil {
@@ -154,6 +168,7 @@ func (s *Store) ReadAsset(stored *Stored, relative string) (string, error) {
 	return string(content), err
 }
 
+// safeReviewDirectory resolves one validated review ID beneath the artifact root.
 func (s *Store) safeReviewDirectory(id string, create bool) (string, error) {
 	if !idPattern.MatchString(id) {
 		return "", &UnsafePathError{Message: "Invalid review ID"}
@@ -161,6 +176,7 @@ func (s *Store) safeReviewDirectory(id string, create bool) (string, error) {
 	return s.safeDirectory(filepath.Join(s.root, artifactDirectory, id), create)
 }
 
+// safeDirectory walks each path component and rejects symlink escapes or non-directories.
 func (s *Store) safeDirectory(candidate string, create bool) (string, error) {
 	candidate = filepath.Clean(candidate)
 	if !inside(s.root, candidate) {
@@ -201,11 +217,13 @@ func (s *Store) safeDirectory(candidate string, create bool) (string, error) {
 	return current, nil
 }
 
+// inside reports whether candidate is root itself or one of its descendants.
 func inside(root, candidate string) bool {
 	relative, err := filepath.Rel(root, candidate)
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
 }
 
+// atomicWrite flushes a temporary file before renaming it over the destination.
 func atomicWrite(path string, content []byte) error {
 	directory := filepath.Dir(path)
 	temporary, err := os.CreateTemp(directory, "."+filepath.Base(path)+".tmp-*")
@@ -232,6 +250,7 @@ func atomicWrite(path string, content []byte) error {
 	return os.Rename(temporaryPath, path)
 }
 
+// normalizeNotFound converts filesystem absence into the store's public error type.
 func normalizeNotFound(err error, id string) error {
 	if errors.Is(err, os.ErrNotExist) {
 		return &NotFoundError{Message: fmt.Sprintf("Review %s does not exist", id)}

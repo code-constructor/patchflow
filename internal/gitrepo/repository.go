@@ -13,24 +13,31 @@ import (
 	"github.com/traqx-ai/patchflow/internal/artifact"
 )
 
+// MaxDiffBytes is the largest patch the current browser renderer will accept.
 const MaxDiffBytes = 2 * 1024 * 1024
 
 var shaPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
+// Repository is a canonical local Git worktree boundary.
 type Repository struct {
 	root string
 }
 
+// Error is a safe, user-facing Git or repository failure.
 type Error struct{ Message string }
 
+// Error returns a repository error suitable for display to a local user.
 func (e *Error) Error() string { return e.Message }
 
+// DiffTooLargeError identifies a file whose patch exceeds MaxDiffBytes.
 type DiffTooLargeError struct{ Path string }
 
+// Error explains why a diff was deliberately withheld from the browser.
 func (e *DiffTooLargeError) Error() string {
 	return fmt.Sprintf("Diff for %s exceeds the current 2 MB display limit", e.Path)
 }
 
+// Open resolves a visible directory to its canonical Git repository root.
 func Open(candidate string) (*Repository, error) {
 	if strings.TrimSpace(candidate) == "" {
 		return nil, &Error{Message: "Choose a local Git repository"}
@@ -58,9 +65,13 @@ func Open(candidate string) (*Repository, error) {
 	return &Repository{root: realRoot}, nil
 }
 
+// Root returns the canonical absolute repository path with symlinks resolved.
 func (r *Repository) Root() string { return r.root }
+
+// Name returns the final path component used as the repository display name.
 func (r *Repository) Name() string { return filepath.Base(r.root) }
 
+// ResolveCommit converts a user-facing ref into an immutable full commit SHA.
 func (r *Repository) ResolveCommit(ref string) (string, error) {
 	if err := validateRef(ref); err != nil {
 		return "", err
@@ -76,6 +87,7 @@ func (r *Repository) ResolveCommit(ref string) (string, error) {
 	return sha, nil
 }
 
+// MergeBase returns the common ancestor used as the actual review diff base.
 func (r *Repository) MergeBase(baseSHA, targetSHA string) (string, error) {
 	if err := validateSHA(baseSHA); err != nil {
 		return "", err
@@ -94,6 +106,7 @@ func (r *Repository) MergeBase(baseSHA, targetSHA string) (string, error) {
 	return sha, nil
 }
 
+// ChangedFiles lists changed paths while excluding Patchflow's own generated artifacts.
 func (r *Repository) ChangedFiles(baseSHA, targetSHA string) ([]artifact.ChangedFile, error) {
 	if err := validateSHA(baseSHA); err != nil {
 		return nil, err
@@ -108,6 +121,7 @@ func (r *Repository) ChangedFiles(baseSHA, targetSHA string) ([]artifact.Changed
 	return parseChangedFiles(output)
 }
 
+// Diff returns a literal-path patch for one changed file, bounded by the display limit.
 func (r *Repository) Diff(baseSHA, targetSHA, path, previousPath string) (string, error) {
 	if err := validateSHA(baseSHA); err != nil {
 		return "", err
@@ -136,6 +150,7 @@ func (r *Repository) Diff(baseSHA, targetSHA, path, previousPath string) (string
 	return output, nil
 }
 
+// FileExcerpt reads an ordered, bounded line range from a file at an exact commit.
 func (r *Repository) FileExcerpt(sha, path string, startLine, endLine int) (string, error) {
 	if err := validateSHA(sha); err != nil {
 		return "", err
@@ -156,13 +171,16 @@ func (r *Repository) FileExcerpt(sha, path string, startLine, endLine int) (stri
 	return strings.Join(lines[start:end], ""), nil
 }
 
+// TargetChanged reports whether a moving target ref no longer matches recorded evidence.
 func (r *Repository) TargetChanged(ref, recordedSHA string) (bool, error) {
 	sha, err := r.ResolveCommit(ref)
 	return sha != recordedSHA, err
 }
 
+// git executes a Git command within this repository.
 func (r *Repository) git(arguments ...string) (string, error) { return run(r.root, arguments...) }
 
+// run executes Git with argument boundaries intact and locale-stable output.
 func run(directory string, arguments ...string) (string, error) {
 	command := exec.Command("git", append([]string{"-C", directory}, arguments...)...)
 	command.Env = append(os.Environ(), "LC_ALL=C")
@@ -181,6 +199,7 @@ func run(directory string, arguments ...string) (string, error) {
 	return stdout.String(), nil
 }
 
+// parseChangedFiles converts Git's NUL-delimited name-status output into artifact records.
 func parseChangedFiles(output string) ([]artifact.ChangedFile, error) {
 	fields := strings.Split(output, "\x00")
 	for len(fields) > 0 && fields[len(fields)-1] == "" {
@@ -217,6 +236,7 @@ func parseChangedFiles(output string) ([]artifact.ChangedFile, error) {
 	return files, nil
 }
 
+// fileStatus maps Git's one-letter status to the artifact vocabulary.
 func fileStatus(code string) string {
 	status, ok := map[string]string{"A": "added", "M": "modified", "D": "deleted", "R": "renamed", "C": "copied", "T": "type_changed", "U": "unmerged"}[code]
 	if !ok {
@@ -225,6 +245,7 @@ func fileStatus(code string) string {
 	return status
 }
 
+// validateRef rejects empty, oversized, or control-character-containing Git refs.
 func validateRef(ref string) error {
 	if strings.TrimSpace(ref) == "" || len(ref) > 512 || strings.ContainsAny(ref, "\x00\n\r") {
 		return &Error{Message: "Invalid Git reference"}
@@ -232,6 +253,7 @@ func validateRef(ref string) error {
 	return nil
 }
 
+// validateSHA accepts only lowercase full-length commit identifiers.
 func validateSHA(sha string) error {
 	if !shaPattern.MatchString(sha) {
 		return &Error{Message: "Invalid commit SHA"}
@@ -239,6 +261,7 @@ func validateSHA(sha string) error {
 	return nil
 }
 
+// validatePath keeps Git paths inside the repository and outside .patchflow.
 func validatePath(value string) error {
 	if value == "" || value == "." || filepath.IsAbs(value) || strings.ContainsAny(value, "\x00\\") || filepath.ToSlash(filepath.Clean(value)) != value || strings.Contains("/"+value+"/", "/../") || excluded(value) {
 		return &Error{Message: "Git path must stay inside the repository and outside .patchflow"}
@@ -246,6 +269,7 @@ func validatePath(value string) error {
 	return nil
 }
 
+// excluded reports whether a path belongs to Patchflow's generated artifact tree.
 func excluded(path string) bool {
 	return path == ".patchflow" || strings.HasPrefix(path, ".patchflow/")
 }

@@ -13,6 +13,7 @@ import (
 	yaml "go.yaml.in/yaml/v3"
 )
 
+// Review is the complete versioned document stored in review.yaml.
 type Review struct {
 	SchemaVersion int          `json:"schema_version" yaml:"schema_version"`
 	ID            string       `json:"id" yaml:"id"`
@@ -28,10 +29,12 @@ type Review struct {
 	Decisions     []Decision   `json:"decisions,omitempty" yaml:"decisions,omitempty"`
 }
 
+// Repository identifies the reviewed project for display purposes.
 type Repository struct {
 	Name string `json:"name" yaml:"name"`
 }
 
+// Source records both requested refs and the immutable commits they resolved to.
 type Source struct {
 	BaseRef   string `json:"base_ref" yaml:"base_ref"`
 	TargetRef string `json:"target_ref" yaml:"target_ref"`
@@ -39,18 +42,21 @@ type Source struct {
 	TargetSHA string `json:"target_sha" yaml:"target_sha"`
 }
 
+// Change summarizes the comparison and inventories every changed path.
 type Change struct {
 	Title   string        `json:"title" yaml:"title"`
 	Summary string        `json:"summary" yaml:"summary"`
 	Files   []ChangedFile `json:"files" yaml:"files"`
 }
 
+// ChangedFile records one path and its Git change status.
 type ChangedFile struct {
 	Path         string `json:"path" yaml:"path"`
 	Status       string `json:"status" yaml:"status"`
 	PreviousPath string `json:"previous_path,omitempty" yaml:"previous_path,omitempty"`
 }
 
+// Step is one ordered review chapter with its evidence blocks.
 type Step struct {
 	ID        string   `json:"id" yaml:"id"`
 	Title     string   `json:"title" yaml:"title"`
@@ -60,6 +66,7 @@ type Step struct {
 	Blocks    []Block  `json:"blocks,omitempty" yaml:"blocks,omitempty"`
 }
 
+// Block is one typed narrative building block in a v2 chapter.
 type Block struct {
 	ID        string `json:"id" yaml:"id"`
 	Type      string `json:"type" yaml:"type"`
@@ -73,12 +80,14 @@ type Block struct {
 	Focus     *Focus `json:"focus,omitempty" yaml:"focus,omitempty"`
 }
 
+// Focus narrows a diff block to an important line range on one side.
 type Focus struct {
 	Side      string `json:"side" yaml:"side"`
 	StartLine int    `json:"start_line" yaml:"start_line"`
 	EndLine   int    `json:"end_line,omitempty" yaml:"end_line,omitempty"`
 }
 
+// Annotation preserves a legacy v1 review comment.
 type Annotation struct {
 	ID        string `json:"id" yaml:"id"`
 	Scope     string `json:"scope" yaml:"scope"`
@@ -90,6 +99,7 @@ type Annotation struct {
 	CreatedAt string `json:"created_at" yaml:"created_at"`
 }
 
+// Decision preserves a legacy v1 review outcome.
 type Decision struct {
 	ID        string `json:"id" yaml:"id"`
 	Summary   string `json:"summary" yaml:"summary"`
@@ -98,18 +108,22 @@ type Decision struct {
 	CreatedAt string `json:"created_at" yaml:"created_at"`
 }
 
+// ValidationErrors collects user-correctable artifact contract failures.
 type ValidationErrors struct {
 	Errors []string `json:"errors"`
 }
 
+// Error combines all validation failures into the standard error representation.
 func (e *ValidationErrors) Error() string {
 	return strings.Join(e.Errors, "\n")
 }
 
+// Validator parses v1 artifacts and validates v2 artifacts against the embedded contract.
 type Validator struct {
 	schema *jsonschema.Schema
 }
 
+// NewValidator compiles the embedded v2 JSON Schema for repeated artifact checks.
 func NewValidator() (*Validator, error) {
 	var document any
 	if err := json.Unmarshal(schema.ReviewV2, &document); err != nil {
@@ -129,6 +143,7 @@ func NewValidator() (*Validator, error) {
 	return &Validator{schema: compiled}, nil
 }
 
+// Parse decodes YAML, applies the versioned schema, and checks cross-field invariants.
 func (v *Validator) Parse(source []byte) (*Review, error) {
 	var yamlDocument any
 	decoder := yaml.NewDecoder(bytes.NewReader(source))
@@ -161,11 +176,13 @@ func (v *Validator) Parse(source []byte) (*Review, error) {
 	return &review, nil
 }
 
+// IsValidationError reports whether err represents invalid artifact content.
 func IsValidationError(err error) bool {
 	var validationErrors *ValidationErrors
 	return errors.As(err, &validationErrors)
 }
 
+// validateSemantics checks relationships and safety rules that JSON Schema cannot express.
 func validateSemantics(review *Review) []string {
 	var found []string
 	if review.ID == "" || review.Repository.Name == "" || review.Change.Title == "" || review.Change.Summary == "" {
@@ -265,6 +282,7 @@ func validateSemantics(review *Review) []string {
 	return unique(found)
 }
 
+// validatePath rejects non-normalized paths and paths outside their permitted root.
 func validatePath(value, label string, artifactRelative bool) []string {
 	hasTraversal := false
 	for _, part := range strings.Split(value, "/") {
@@ -282,6 +300,7 @@ func validatePath(value, label string, artifactRelative bool) []string {
 	return nil
 }
 
+// unique preserves the first occurrence of each validation message.
 func unique(values []string) []string {
 	seen := map[string]bool{}
 	result := make([]string, 0, len(values))

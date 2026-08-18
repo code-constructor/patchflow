@@ -5,22 +5,26 @@ export default class extends Controller {
   static targets = ["source", "output", "splitButton", "unifiedButton"]
   static values = { highlights: Object, initial: String }
 
+  /** Restores the preferred layout and renders the initial diff. */
   connect() {
     const configuredMode = this.initialValue === "unified" ? "line-by-line" : "side-by-side"
     this.mode = localStorage.getItem("patchflow-diff-mode") || configuredMode
     this.render()
   }
 
+  /** Switches the current diff to side-by-side presentation. */
   showSplit() {
     this.mode = "side-by-side"
     this.render()
   }
 
+  /** Switches the current diff to a single inline presentation. */
   showUnified() {
     this.mode = "line-by-line"
     this.render()
   }
 
+  /** Rebuilds Diff2Html output and reapplies Patchflow's syntax spans. */
   render() {
     localStorage.setItem("patchflow-diff-mode", this.mode)
     this.outputTarget.innerHTML = globalThis.Diff2Html.html(this.sourceTarget.textContent, {
@@ -32,6 +36,7 @@ export default class extends Controller {
     this.applySyntaxHighlighting()
   }
 
+  /** Keeps the layout controls and their accessibility state in sync. */
   updateButtons() {
     const splitActive = this.mode === "side-by-side"
     this.splitButtonTarget.classList.toggle("is-active", splitActive)
@@ -40,6 +45,7 @@ export default class extends Controller {
     this.unifiedButtonTarget.setAttribute("aria-pressed", !splitActive)
   }
 
+  /** Applies server-generated token colors to the active diff layout. */
   applySyntaxHighlighting() {
     if (this.mode === "side-by-side") {
       const panes = this.outputTarget.querySelectorAll(".d2h-file-side-diff")
@@ -60,6 +66,7 @@ export default class extends Controller {
     }
   }
 
+  /** Highlights every code row in one side of a split diff. */
   highlightRows(pane, side, numberSelector) {
     if (!pane) return
 
@@ -70,6 +77,7 @@ export default class extends Controller {
     }
   }
 
+  /** Safely installs a pre-sanitized line's token spans into Diff2Html. */
   highlightCode(element, highlighted) {
     if (!element || !highlighted) return
 

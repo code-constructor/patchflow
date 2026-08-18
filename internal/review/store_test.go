@@ -11,6 +11,7 @@ import (
 	"github.com/traqx-ai/patchflow/internal/gitrepo"
 )
 
+// TestCreatorPersistsValidV2Review exercises the complete Git-to-artifact creation path.
 func TestCreatorPersistsValidV2Review(t *testing.T) {
 	directory := testRepository(t)
 	repository, _ := gitrepo.Open(directory)
@@ -32,6 +33,7 @@ func TestCreatorPersistsValidV2Review(t *testing.T) {
 	}
 }
 
+// TestStoreRejectsPatchflowSymlinkEscape protects writes from a redirected artifact root.
 func TestStoreRejectsPatchflowSymlinkEscape(t *testing.T) {
 	directory := testRepository(t)
 	outside := t.TempDir()
@@ -53,6 +55,7 @@ func TestStoreRejectsPatchflowSymlinkEscape(t *testing.T) {
 	}
 }
 
+// TestStoreRejectsAssetSymlinkOutsideReview protects asset reads from redirected files.
 func TestStoreRejectsAssetSymlinkOutsideReview(t *testing.T) {
 	directory := testRepository(t)
 	repository, _ := gitrepo.Open(directory)
@@ -77,6 +80,7 @@ func TestStoreRejectsAssetSymlinkOutsideReview(t *testing.T) {
 	}
 }
 
+// testRepository creates a disposable committed change for review-store tests.
 func testRepository(t *testing.T) string {
 	t.Helper()
 	directory := t.TempDir()
@@ -92,6 +96,8 @@ func testRepository(t *testing.T) string {
 	testGit(t, directory, "commit", "-m", "target")
 	return directory
 }
+
+// testGit executes a Git fixture command and fails the current test on error.
 func testGit(t *testing.T, directory string, args ...string) {
 	t.Helper()
 	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
@@ -99,6 +105,8 @@ func testGit(t *testing.T, directory string, args ...string) {
 		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
 }
+
+// testWrite creates parent directories and writes one review fixture file.
 func testWrite(t *testing.T, root, relative, content string) {
 	t.Helper()
 	path := filepath.Join(root, relative)

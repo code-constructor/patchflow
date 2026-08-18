@@ -14,6 +14,7 @@ import (
 
 var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
 
+// highlightCode turns a source excerpt into independently numbered, highlighted lines.
 func highlightCode(path, source string, startLine int) []CodeLine {
 	lines := strings.SplitAfter(source, "\n")
 	if len(lines) > 0 && lines[len(lines)-1] == "" {
@@ -26,16 +27,19 @@ func highlightCode(path, source string, startLine int) []CodeLine {
 	return result
 }
 
+// highlightDiffJSON builds the old/new line maps consumed by the diff controller.
 func highlightDiffJSON(path, diff string) string {
 	result := map[string]map[int]string{"old": {}, "new": {}}
 	oldLine, newLine := 0, 0
+	inHunk := false
 	for _, line := range strings.Split(diff, "\n") {
 		if match := hunkHeader.FindStringSubmatch(line); match != nil {
 			oldLine = parseNumber(match[1])
 			newLine = parseNumber(match[2])
+			inHunk = true
 			continue
 		}
-		if oldLine == 0 || newLine == 0 || line == "" {
+		if !inHunk || line == "" {
 			continue
 		}
 		content := line[1:]
@@ -58,6 +62,7 @@ func highlightDiffJSON(path, diff string) string {
 	return string(encoded)
 }
 
+// highlightLine lexes one source line and returns escaped HTML for GitHub-like light surfaces.
 func highlightLine(path, source string) template.HTML {
 	lexer := lexers.Match(path)
 	if lexer == nil {
@@ -75,6 +80,7 @@ func highlightLine(path, source string) template.HTML {
 	return template.HTML(output.String())
 }
 
+// parseNumber converts an ASCII decimal line number without exposing parse errors.
 func parseNumber(value string) int {
 	result := 0
 	for _, digit := range value {

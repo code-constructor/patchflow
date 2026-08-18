@@ -80,6 +80,12 @@ Patchflow must avoid reviewing its own generated review artifact by default.
 ## Working Agreement
 
 - Keep the application runnable with `bin/patchflow` and Git alone.
+- Document every named function and method, including unexported helpers and
+  tests. Go Doc comments start with the declared name and explain purpose,
+  contract, or important side effects instead of restating the implementation.
+  Browser-controller methods follow the same rule with concise JSDoc comments.
+- Keep `bin/docs` working so the complete Go package documentation can always
+  be rendered from source with standard Go tooling.
 - Add focused tests for new behavior. Run `bin/ci` before handoff.
 - Do not commit compiled binaries, temporary files, or machine-specific
   configuration.

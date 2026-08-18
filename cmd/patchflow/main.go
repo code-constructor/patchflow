@@ -15,10 +15,12 @@ import (
 	patchflowweb "github.com/traqx-ai/patchflow/internal/web"
 )
 
+// main passes command-line arguments to the testable command dispatcher.
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
+// run dispatches a top-level command and returns the process exit code.
 func run(arguments []string) int {
 	if len(arguments) == 0 {
 		usage()
@@ -37,6 +39,7 @@ func run(arguments []string) int {
 	}
 }
 
+// validate checks one review artifact and prints either human-readable or JSON output.
 func validate(arguments []string) int {
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
 	format := flags.String("format", "text", "output format: text or json")
@@ -70,6 +73,7 @@ func validate(arguments []string) int {
 	return 0
 }
 
+// serve starts the local HTTP application for an optional repository and address.
 func serve(arguments []string) int {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	reviewPath := flags.String("review", "", "deprecated: path to review.yaml")
@@ -98,6 +102,7 @@ func serve(arguments []string) int {
 	return 0
 }
 
+// create resolves a committed Git comparison and persists its baseline review artifact.
 func create(arguments []string) int {
 	flags := flag.NewFlagSet("create", flag.ContinueOnError)
 	repositoryPath := flags.String("repository", "", "path to the reviewed Git repository")
@@ -132,6 +137,7 @@ func create(arguments []string) int {
 	return 1
 }
 
+// loadReview reads and validates a review artifact from disk.
 func loadReview(path string) (*artifact.Review, error) {
 	source, err := os.ReadFile(path)
 	if err != nil {
@@ -144,10 +150,12 @@ func loadReview(path string) (*artifact.Review, error) {
 	return validator.Parse(source)
 }
 
+// usage prints the supported top-level commands to standard error.
 func usage() {
 	fmt.Fprintln(os.Stderr, "Usage: patchflow <create|validate|serve> [options]")
 }
 
+// repositoryFromReviewPath finds the repository root above a .patchflow review path.
 func repositoryFromReviewPath(reviewPath string) string {
 	directory := filepath.Dir(reviewPath)
 	for directory != filepath.Dir(directory) {

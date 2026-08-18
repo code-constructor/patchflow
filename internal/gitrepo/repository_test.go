@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestChangedFilesAndLiteralDiff covers renames, unusual filenames, and artifact exclusion.
 func TestChangedFilesAndLiteralDiff(t *testing.T) {
 	directory := testRepository(t)
 	repository, err := Open(directory)
@@ -32,6 +33,7 @@ func TestChangedFilesAndLiteralDiff(t *testing.T) {
 	}
 }
 
+// TestDiffRejectsFilesOverDisplayLimit verifies the explicit large-diff boundary.
 func TestDiffRejectsFilesOverDisplayLimit(t *testing.T) {
 	directory := testRepository(t)
 	writeTestFile(t, directory, "generated.js", strings.Repeat("const generated = true;\n", 100_000))
@@ -45,6 +47,7 @@ func TestDiffRejectsFilesOverDisplayLimit(t *testing.T) {
 	}
 }
 
+// testRepository creates a disposable Git history shared by repository tests.
 func testRepository(t *testing.T) string {
 	t.Helper()
 	directory := t.TempDir()
@@ -61,6 +64,8 @@ func testRepository(t *testing.T) string {
 	runTestGit(t, directory, "commit", "-m", "target")
 	return directory
 }
+
+// runTestGit executes a Git fixture command and fails the current test on error.
 func runTestGit(t *testing.T, directory string, args ...string) {
 	t.Helper()
 	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
@@ -68,6 +73,8 @@ func runTestGit(t *testing.T, directory string, args ...string) {
 		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
 }
+
+// writeTestFile creates parent directories and writes one repository fixture file.
 func writeTestFile(t *testing.T, root, relative, content string) {
 	t.Helper()
 	path := filepath.Join(root, relative)
