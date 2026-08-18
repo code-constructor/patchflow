@@ -211,6 +211,23 @@ textarea { min-height: 92px; resize: vertical; }
 .line-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .breadcrumb { margin-bottom: 20px; color: var(--muted); font-size: 13px; }
 .step-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 28px; }
+.path-picker-field { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.repository-picker { width: min(760px, calc(100vw - 32px)); max-height: min(720px, calc(100vh - 32px)); padding: 0; border: 0; border-radius: 16px; color: var(--ink); background: transparent; box-shadow: 0 24px 80px rgba(20, 32, 24, .28); }
+.repository-picker::backdrop { background: rgba(16, 25, 19, .55); backdrop-filter: blur(3px); }
+.repository-picker__chrome { position: relative; padding: 24px; background: var(--surface); }
+.repository-picker__close { position: absolute; z-index: 1; top: 13px; right: 15px; width: 34px; height: 34px; border: 0; border-radius: 50%; color: var(--muted); background: #eef1ec; font-size: 24px; line-height: 1; cursor: pointer; }
+.repository-picker__header { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-right: 36px; }
+.repository-picker__path { max-width: 520px; margin-top: 5px; overflow: hidden; color: var(--muted); font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.repository-picker__list { display: grid; max-height: min(520px, calc(100vh - 190px)); margin-top: 20px; overflow-y: auto; border: 1px solid var(--line); border-radius: 11px; }
+.repository-picker__entry { display: flex; align-items: center; justify-content: space-between; min-width: 0; padding: 10px 12px; color: var(--ink); text-decoration: none; }
+.repository-picker__entry + .repository-picker__entry { border-top: 1px solid var(--line); }
+.repository-picker__entry:hover { background: #f7f9f6; }
+.repository-picker__entry > a, a.repository-picker__entry { flex: 1; display: flex; align-items: center; min-width: 0; gap: 11px; color: var(--ink); text-decoration: none; }
+.repository-picker__entry strong, .repository-picker__entry small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-picker__entry small { margin-top: 2px; color: var(--muted); font-size: 11px; }
+.repository-picker__entry .button { flex: none; margin-left: 12px; }
+.repository-picker__icon { width: 20px; color: var(--accent); text-align: center; }
+.repository-picker__empty, .repository-picker__loading { padding: 28px; text-align: center; }
 
 @media (max-width: 720px) {
   .page-shell { width: min(100% - 28px, 1180px); margin-top: 26px; }
@@ -219,4 +236,6 @@ textarea { min-height: 92px; resize: vertical; }
   .review-link, .step-link { grid-template-columns: 38px 1fr; }
   .review-link > :last-child, .step-link > :last-child { grid-column: 2; }
   .line-fields { grid-template-columns: 1fr; }
+  .path-picker-field { grid-template-columns: 1fr; }
+  .repository-picker__header { align-items: flex-start; flex-direction: column; }
 }

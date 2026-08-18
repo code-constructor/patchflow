@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -27,6 +29,7 @@ type App struct {
 	templates         map[string]*template.Template
 	assets            http.Handler
 	defaultRepository string
+	browseRoot        string
 	logger            *slog.Logger
 }
 
@@ -42,6 +45,7 @@ type Page struct {
 	TargetRef      string
 	Review         *ReviewView
 	Chapter        *ChapterView
+	PickerRoot     string
 }
 type RepositoryView struct{ Name, Path string }
 type ReviewListItem struct{ ID, Title, Summary, Status string }
@@ -66,6 +70,16 @@ type BlockView struct {
 type CodeLine struct {
 	Number int
 	HTML   template.HTML
+}
+type RepositoryPickerView struct {
+	Root, Current, Parent string
+	CurrentIsRepository   bool
+	Entries               []DirectoryView
+	Error                 string
+}
+type DirectoryView struct {
+	Name, Path   string
+	IsRepository bool
 }
 
 func NewApp(defaultRepository string, logger *slog.Logger) (*App, error) {
@@ -97,11 +111,16 @@ func NewApp(defaultRepository string, logger *slog.Logger) (*App, error) {
 		}
 		templates[name] = page
 	}
+	picker, err := template.New("repository_picker").Funcs(functions).ParseFS(embedded, "templates/repository_picker.html")
+	if err != nil {
+		return nil, fmt.Errorf("parse repository picker template: %w", err)
+	}
+	templates["repository_picker"] = picker
 	assetFS, err := fs.Sub(embedded, "assets")
 	if err != nil {
 		return nil, err
 	}
-	return &App{templates: templates, assets: http.StripPrefix("/assets/", http.FileServer(http.FS(assetFS))), defaultRepository: defaultRepository, logger: logger}, nil
+	return &App{templates: templates, assets: http.StripPrefix("/assets/", http.FileServer(http.FS(assetFS))), defaultRepository: defaultRepository, browseRoot: discoverBrowseRoot(defaultRepository), logger: logger}, nil
 }
 
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -123,6 +142,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.openRepository(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/repository/close":
 		a.closeRepository(w, r)
+	case r.Method == http.MethodGet && r.URL.Path == "/repository-picker":
+		a.repositoryPicker(w, r)
 	case r.Method == http.MethodGet && r.URL.Path == "/reviews/new":
 		a.newReview(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/reviews":
@@ -137,7 +158,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) home(w http.ResponseWriter, r *http.Request) {
-	page := Page{Title: "Patchflow · Understand the change", RepositoryPath: a.defaultRepository, Notice: r.URL.Query().Get("notice"), Alert: r.URL.Query().Get("alert")}
+	page := Page{Title: "Patchflow · Understand the change", RepositoryPath: a.defaultRepository, PickerRoot: a.browseRoot, Notice: r.URL.Query().Get("notice"), Alert: r.URL.Query().Get("alert")}
 	repository, err := a.currentRepository(r)
 	if err == nil && repository != nil {
 		page.Repository = &RepositoryView{Name: repository.Name(), Path: repository.Root()}
@@ -161,6 +182,16 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 		clearRepositoryCookie(w)
 	}
 	a.render(w, "home", page, http.StatusOK)
+}
+
+func (a *App) repositoryPicker(w http.ResponseWriter, r *http.Request) {
+	view, err := browseDirectories(a.browseRoot, r.URL.Query().Get("path"))
+	status := http.StatusOK
+	if err != nil {
+		status = http.StatusUnprocessableEntity
+		view = RepositoryPickerView{Root: a.browseRoot, Current: a.browseRoot, Error: err.Error()}
+	}
+	a.renderPartial(w, "repository_picker", "repository_picker", view, status)
 }
 
 func (a *App) openRepository(w http.ResponseWriter, r *http.Request) {
@@ -388,6 +419,18 @@ func (a *App) render(w http.ResponseWriter, name string, page Page, status int) 
 	w.WriteHeader(status)
 	_, _ = buffer.WriteTo(w)
 }
+
+func (a *App) renderPartial(w http.ResponseWriter, name, templateName string, value any, status int) {
+	var buffer bytes.Buffer
+	if err := a.templates[name].ExecuteTemplate(&buffer, templateName, value); err != nil {
+		a.logger.Error("render partial", "template", templateName, "error", err)
+		http.Error(w, "Could not render page", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = buffer.WriteTo(w)
+}
 func (a *App) securityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -414,4 +457,91 @@ func defaultString(value, fallback string) string {
 func humanize(value string) string { return strings.Title(strings.ReplaceAll(value, "_", " ")) }
 func matchPath(path, prefix, separator string) bool {
 	return strings.HasPrefix(path, prefix) && strings.Contains(strings.TrimPrefix(path, prefix), separator)
+}
+
+func discoverBrowseRoot(defaultRepository string) string {
+	if defaultRepository != "" {
+		if repository, err := gitrepo.Open(defaultRepository); err == nil {
+			return filepath.Dir(repository.Root())
+		}
+	}
+	for _, candidate := range []string{"/workspace", projectsDirectory()} {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			if resolved, resolveErr := filepath.EvalSymlinks(candidate); resolveErr == nil {
+				return resolved
+			}
+		}
+	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return string(filepath.Separator)
+	}
+	return workingDirectory
+}
+
+func projectsDirectory() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, "Projects")
+}
+
+func browseDirectories(root, requested string) (RepositoryPickerView, error) {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return RepositoryPickerView{}, fmt.Errorf("cannot access repository browser root: %w", err)
+	}
+	if requested == "" {
+		requested = resolvedRoot
+	}
+	if !filepath.IsAbs(requested) {
+		return RepositoryPickerView{}, fmt.Errorf("repository browser paths must be absolute")
+	}
+	resolvedCurrent, err := filepath.EvalSymlinks(filepath.Clean(requested))
+	if err != nil {
+		return RepositoryPickerView{}, fmt.Errorf("cannot access directory: %w", err)
+	}
+	if !pathInside(resolvedRoot, resolvedCurrent) {
+		return RepositoryPickerView{}, fmt.Errorf("directory is outside the browsable root %s", resolvedRoot)
+	}
+	info, err := os.Stat(resolvedCurrent)
+	if err != nil || !info.IsDir() {
+		return RepositoryPickerView{}, fmt.Errorf("selected path is not a directory")
+	}
+
+	view := RepositoryPickerView{Root: resolvedRoot, Current: resolvedCurrent, CurrentIsRepository: isRepositoryRoot(resolvedCurrent)}
+	if resolvedCurrent != resolvedRoot {
+		view.Parent = filepath.Dir(resolvedCurrent)
+	}
+	entries, err := os.ReadDir(resolvedCurrent)
+	if err != nil {
+		return RepositoryPickerView{}, fmt.Errorf("cannot list directory: %w", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		candidate := filepath.Join(resolvedCurrent, entry.Name())
+		resolvedCandidate, resolveErr := filepath.EvalSymlinks(candidate)
+		if resolveErr != nil || !pathInside(resolvedRoot, resolvedCandidate) {
+			continue
+		}
+		candidateInfo, statErr := os.Stat(resolvedCandidate)
+		if statErr != nil || !candidateInfo.IsDir() {
+			continue
+		}
+		view.Entries = append(view.Entries, DirectoryView{Name: entry.Name(), Path: resolvedCandidate, IsRepository: isRepositoryRoot(resolvedCandidate)})
+	}
+	return view, nil
+}
+
+func isRepositoryRoot(path string) bool {
+	_, err := os.Stat(filepath.Join(path, ".git"))
+	return err == nil
+}
+
+func pathInside(root, candidate string) bool {
+	relative, err := filepath.Rel(root, candidate)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
 }

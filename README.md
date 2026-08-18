@@ -128,6 +128,11 @@ Patchflow to review local projects. For example, host project
 `$HOME/Projects/example` is selected in the container UI as
 `/workspace/example`.
 
+The **Browse…** button opens a server-side repository picker rooted at
+`/workspace`, so container paths do not need to be entered by hand. In local
+development the picker starts beside the preselected repository or in the
+user's `Projects` directory.
+
 The image runs as UID and GID `1000` by default so review artifacts remain owned
 by the developer. Override these values on systems with different IDs:
 

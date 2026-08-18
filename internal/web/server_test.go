@@ -51,6 +51,44 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 }
 
+func TestRepositoryPickerListsGitRepositoriesAndRejectsEscapes(t *testing.T) {
+	repository := featureRepository(t)
+	app, err := NewApp(repository, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := perform(app, http.MethodGet, "/repository-picker?path="+url.QueryEscape(app.browseRoot), "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("picker returned %d: %s", response.Code, response.Body.String())
+	}
+	for _, expected := range []string{filepath.Base(repository), "Git repository", "data-repository-picker-path-param=\"" + repository + "\""} {
+		if !strings.Contains(response.Body.String(), expected) {
+			t.Errorf("picker missing %q", expected)
+		}
+	}
+
+	escape := perform(app, http.MethodGet, "/repository-picker?path="+url.QueryEscape(string(filepath.Separator)), "")
+	if escape.Code != http.StatusUnprocessableEntity || !strings.Contains(escape.Body.String(), "outside the browsable root") {
+		t.Fatalf("picker did not reject escape: %d %s", escape.Code, escape.Body.String())
+	}
+}
+
+func TestBrowseDirectoriesSkipsSymlinksOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	view, err := browseDirectories(root, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Entries) != 0 {
+		t.Fatalf("expected outside symlink to be hidden, got %#v", view.Entries)
+	}
+}
+
 func TestAppRendersLegacyV1AsChapterBlocks(t *testing.T) {
 	repository := featureRepository(t)
 	source, err := os.ReadFile(filepath.Join("..", "..", "docs", "examples", "review.yaml"))

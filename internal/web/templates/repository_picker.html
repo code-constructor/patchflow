@@ -1,0 +1,21 @@
+{{define "repository_picker"}}
+<turbo-frame id="repository-picker-frame">
+  <div class="repository-picker__header">
+    <div>
+      <div class="eyebrow">Browse repositories</div>
+      <div class="repository-picker__path" title="{{.Current}}">{{.Current}}</div>
+    </div>
+    {{if .CurrentIsRepository}}<button type="button" class="button button--small" data-action="repository-picker#select" data-repository-picker-path-param="{{.Current}}">Choose this repository</button>{{end}}
+  </div>
+  {{if .Error}}<div class="flash flash--alert">{{.Error}}</div>{{end}}
+  <div class="repository-picker__list">
+    {{if .Parent}}<a class="repository-picker__entry" href="/repository-picker?path={{urlquery .Parent}}" data-turbo-frame="repository-picker-frame"><span class="repository-picker__icon">↰</span><span><strong>Parent directory</strong><small>{{.Parent}}</small></span></a>{{end}}
+    {{range .Entries}}
+      <div class="repository-picker__entry">
+        <a href="/repository-picker?path={{urlquery .Path}}" data-turbo-frame="repository-picker-frame"><span class="repository-picker__icon">{{if .IsRepository}}◆{{else}}▸{{end}}</span><span><strong>{{.Name}}</strong>{{if .IsRepository}}<small>Git repository</small>{{else}}<small>Directory</small>{{end}}</span></a>
+        {{if .IsRepository}}<button type="button" class="button button--small button--quiet" data-action="repository-picker#select" data-repository-picker-path-param="{{.Path}}">Choose</button>{{end}}
+      </div>
+    {{else}}<p class="muted repository-picker__empty">No directories found here.</p>{{end}}
+  </div>
+</turbo-frame>
+{{end}}
