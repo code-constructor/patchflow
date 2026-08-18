@@ -101,6 +101,32 @@ as a stable block resource path instead of browser storage. Give chapters a
 review question, attention map, decision gate when critical, sticky block
 navigation, explicit takeaway, and a noise budget for mechanical evidence.
 
+### 11. Addressable comment threads — next
+
+Let reviewers and agents discuss the evidence in place. A thread can target a
+whole narrative block or an immutable code anchor made from the reviewed commit,
+file path, diff side, and one line or a contiguous line range. Persist threads
+inside `.patchflow/reviews/<review-id>` as part of the review artifact rather
+than in an application database.
+
+Give every thread, comment, and reply a stable review-wide ID and a copy control
+for its canonical review path. Use one comment model across the web UI and CLI:
+the CLI must be able to list and inspect threads, create comments, and append
+replies so Coding Agents can participate without browser automation. Validate
+all references against the immutable review source, write updates atomically,
+and preserve author, creation time, resolution state, and reply order.
+
+### 12. Classic source review — planned
+
+Add an optional files-first review surface for reviewers who need to inspect the
+complete change outside the guided chapters. Provide changed-file navigation,
+syntax-highlighted unified and split diffs, and the familiar ability to open a
+thread on one line or a selected line range.
+
+Render the same persisted threads from milestone 11 both beside chapter evidence
+and in the source browser. The files view is a second way to traverse one review,
+not a second comment store or a competing review format.
+
 ## Acceptance scenario
 
 Given a local repository with a `main` branch and a committed feature branch,
