@@ -1,6 +1,15 @@
-#!/usr/bin/env ruby
-require_relative "../config/boot"
-require "active_support/continuous_integration"
+#!/usr/bin/env bash
+set -euo pipefail
 
-CI = ActiveSupport::ContinuousIntegration
-require_relative "../config/ci.rb"
+export GOFLAGS="${GOFLAGS:+${GOFLAGS} }-mod=mod"
+
+unformatted="$(gofmt -l schema internal cmd)"
+if [[ -n "${unformatted}" ]]; then
+  echo "Go files need formatting:"
+  echo "${unformatted}"
+  exit 1
+fi
+
+go vet ./...
+go test ./...
+go build -trimpath ./cmd/patchflow

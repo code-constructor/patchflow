@@ -4,32 +4,17 @@
 # belong in git's global ignore instead:
 # `$XDG_CONFIG_HOME/git/ignore` or `~/.config/git/ignore`
 
-# Ignore bundler config.
-/.bundle
-/vendor/bundle
-
 # Ignore all environment files.
 /.env*
 
-# Ignore all logfiles and tempfiles.
-/log/*
-/tmp/*
-!/log/.keep
-!/tmp/.keep
+# Local binaries and test output.
+/patchflow
+/coverage.out
 
-# Ignore pidfiles, but keep the directory.
-/tmp/pids/*
-!/tmp/pids/
-!/tmp/pids/.keep
-
-# Ignore storage (uploaded files in development and any SQLite databases).
-/storage/*
-!/storage/.keep
-/tmp/storage/*
-!/tmp/storage/
-!/tmp/storage/.keep
-
-/public/assets
-
-# Ignore key files for decrypting credentials and more.
+# Left behind by pre-Go development checkouts; never commit it.
+/.bundle/
 /config/*.key
+/log/
+/storage/
+/tmp/
+/vendor/bundle

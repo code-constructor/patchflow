@@ -121,12 +121,6 @@ Prefer machine-readable output while iterating:
 bin/patchflow validate --format json /absolute/repository/path/.patchflow/reviews/<review-id>/review.yaml
 ```
 
-The Go implementation is equivalent when Rails dependencies are unavailable:
-
-```sh
-bin/patchflow-go validate --format json /absolute/repository/path/.patchflow/reviews/<review-id>/review.yaml
-```
-
 Otherwise perform every invariant check in the bundled contract. Fix all
 validation errors before handing off. Finally inspect `git status --short` and
 confirm that only the intended `.patchflow/reviews/<review-id>` artifact changed.

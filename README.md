@@ -83,38 +83,28 @@ placeholder so they do not block the rest of a review step.
 
 ## Technical foundation
 
-- one monorepo containing Ruby 3.4 / Rails 8.1 and a Go 1.24+ command;
-- one JSON Schema and one fixture suite shared by both implementations;
-- SQLite for application data, cache, jobs, and Action Cable
-- Server-rendered HTML with Hotwire, Turbo, and Stimulus
-- Importmap for JavaScript dependencies
-- Diff2Html and Rouge for local diff rendering and syntax highlighting
-- an embedded-schema Go validator and local HTTP reader
+- one Go 1.24+ application for the CLI, artifact engine, and local web UI;
+- the standard library HTTP server and typed `html/template` view models;
+- server-rendered HTML enhanced with Turbo and Stimulus;
+- browser-native ES modules and an Import Map, with no Node or Vite pipeline;
+- Diff2Html and Chroma for local diff rendering and syntax highlighting; and
+- JSON Schema, templates, styles, and browser dependencies embedded into the
+  self-contained binary with `go:embed`.
 
 Patchflow is designed to run on the developer's machine. The initial product
-does not require an account, hosted service, Redis, PostgreSQL, Docker, or a
-cloud dependency.
+does not require an account, hosted service, database, Node, Docker, or a cloud
+dependency.
 
 ## Local development
 
 Prerequisites:
 
-- Ruby 3.4.10
-- Bundler
 - Git
-- SQLite 3
-- Go 1.24 or newer when developing the Go command
+- Go 1.24 or newer
 
-Install dependencies, prepare the local databases, and start the application:
-
-```sh
-bin/setup
-```
-
-Or perform setup without starting the server:
+Start the application directly from source:
 
 ```sh
-bin/setup --skip-server
 bin/dev
 ```
 
@@ -133,9 +123,9 @@ docker compose up --build
 Patchflow is then available at <http://patchflow.localhost>. No host port is
 claimed by the application container; Traefik discovers it from Compose labels.
 
-The project itself is mounted at `/app`. The host's `$HOME/Projects` directory
-is mounted at `/workspace`, allowing Patchflow to review other local projects.
-For example, host project `$HOME/Projects/example` is selected in the UI as
+The host's `$HOME/Projects` directory is mounted at `/workspace`, allowing
+Patchflow to review local projects. For example, host project
+`$HOME/Projects/example` is selected in the container UI as
 `/workspace/example`.
 
 The image runs as UID and GID `1000` by default so review artifacts remain owned
@@ -146,8 +136,7 @@ PATCHFLOW_UID="$(id -u)" PATCHFLOW_GID="$(id -g)" docker compose up --build
 ```
 
 Use `DEV_DOMAIN` to select another `*.localhost` hostname. This Docker workflow
-is a convenience for development; Patchflow itself still requires only Ruby,
-Git, and SQLite.
+is a convenience; Patchflow itself requires only its compiled binary and Git.
 
 ## Try the review workflow
 
@@ -172,19 +161,16 @@ bin/patchflow validate \
   /absolute/path/to/repository/.patchflow/reviews/<review-id>/review.yaml
 ```
 
-The Go implementation validates the same artifact and can start a standalone
-reader without Rails:
+Start the complete local application, optionally with a repository already
+selected:
 
 ```sh
-bin/patchflow-go validate --format json /absolute/path/to/review.yaml
-bin/patchflow-go serve \
-  --review /absolute/path/to/review.yaml \
-  --repository /absolute/path/to/repository
+bin/patchflow serve --repository /absolute/path/to/repository
 ```
 
-The reader listens on <http://127.0.0.1:4040>. Build a single binary with
-`GOFLAGS=-mod=mod go build -o patchflow ./cmd/patchflow`. The explicit module
-mode avoids treating Rails' existing `vendor/` directory as a Go vendor tree.
+The server listens on <http://127.0.0.1:3000>. Build the self-contained binary
+with `go build -o patchflow ./cmd/patchflow`; it contains the templates, CSS,
+JavaScript modules, schema, and vendored browser libraries.
 
 The repository also contains the Coding Agent skill
 `create-patchflow-review` under `.agents/skills/`. It can analyze the committed
@@ -193,19 +179,12 @@ documentation while preserving the recorded source SHAs.
 
 ## Verification
 
-Run the Rails test suite:
-
-```sh
-bin/rails test
-```
-
-Run the complete local CI pipeline, including formatting and security checks:
+Run the complete local CI pipeline, including formatting, static analysis,
+tests, and a production build:
 
 ```sh
 bin/ci
 ```
-
-Run only the Go format, vet, and shared-fixture tests with `bin/go-ci`.
 
 ## Design constraints
 
@@ -217,5 +196,5 @@ Run only the Go format, vet, and shared-fixture tests with `bin/go-ci`.
 - **Evidence preserving:** artifacts are tied to immutable commit SHAs.
 - **Safe by default:** filesystem paths are untrusted and must never escape the
   selected repository.
-- **Monorepo:** Rails, Go, schemas, fixtures, docs, and agent skills evolve in
-  the same repository.
+- **Monorepo:** the Go application, embedded frontend, schemas, fixtures, docs,
+  and agent skills evolve in the same repository.

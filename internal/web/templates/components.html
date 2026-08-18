@@ -1,0 +1,35 @@
+{{define "diff"}}
+<div class="diff-viewer" data-controller="diff-viewer" data-diff-viewer-initial-value="{{.View}}" data-diff-viewer-highlights-value="{{.Highlights}}">
+  <div class="diff-toolbar" aria-label="Diff layout">
+    <button type="button" class="diff-mode-button" data-diff-viewer-target="splitButton" data-action="diff-viewer#showSplit">Split</button>
+    <button type="button" class="diff-mode-button" data-diff-viewer-target="unifiedButton" data-action="diff-viewer#showUnified">Unified</button>
+  </div>
+  <pre hidden data-diff-viewer-target="source">{{.Source}}</pre>
+  <div class="diff-render" data-diff-viewer-target="output"></div>
+  <noscript><pre class="diff">{{.Source}}</pre></noscript>
+</div>
+{{end}}
+
+{{define "markdown"}}<div data-controller="review-document"><pre class="markdown-source" data-review-document-target="source">{{.}}</pre><div class="markdown" data-review-document-target="output"></div></div>{{end}}
+
+{{define "block"}}
+  {{if eq .Type "prose"}}
+    <section class="review-block review-block--prose" id="{{.ID}}">{{template "markdown" .Body}}</section>
+  {{else if eq .Type "callout"}}
+    <aside class="review-block callout callout--{{.Kind}}" id="{{.ID}}"><div class="eyebrow">{{.Kind}}</div>{{template "markdown" .Body}}</aside>
+  {{else if eq .Type "question"}}
+    <aside class="review-block review-question" id="{{.ID}}"><div class="eyebrow">Open question</div>{{template "markdown" .Body}}</aside>
+  {{else if eq .Type "diff"}}
+    <section class="review-block card code-card" id="{{.ID}}">
+      <header class="code-card__header"><div><div class="eyebrow">Changed file</div><h3>{{.Path}}</h3></div>{{if .Focus}}<span class="focus-label">{{.Focus}}</span>{{end}}</header>
+      {{if .Error}}<div class="diff-notice"><strong>Diff not displayed</strong><p>{{.Error}}. Review this generated or unusually large file directly in the repository.</p></div>{{else}}{{template "diff" .}}{{end}}
+    </section>
+  {{else if eq .Type "code"}}
+    <section class="review-block card code-card" id="{{.ID}}">
+      <header class="code-card__header"><div><div class="eyebrow">{{.SourceSide}} source</div><h3>{{.Path}}</h3></div><span class="focus-label">lines {{.StartLine}}–{{.EndLine}}</span></header>
+      {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}<div class="code-excerpt">{{range .CodeLines}}<div class="code-excerpt__line"><span class="code-excerpt__number">{{.Number}}</span><code>{{.HTML}}</code></div>{{end}}</div>{{end}}
+    </section>
+  {{else if eq .Type "diagram"}}
+    <section class="review-block card" id="{{.ID}}"><div class="eyebrow">Diagram</div>{{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}{{template "markdown" .DiagramMarkdown}}{{end}}</section>
+  {{end}}
+{{end}}

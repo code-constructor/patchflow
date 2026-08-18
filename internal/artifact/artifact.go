@@ -14,67 +14,88 @@ import (
 )
 
 type Review struct {
-	SchemaVersion int        `json:"schema_version"`
-	ID            string     `json:"id"`
-	Repository    Repository `json:"repository"`
-	Source        Source     `json:"source"`
-	CreatedAt     string     `json:"created_at"`
-	UpdatedAt     string     `json:"updated_at"`
-	Status        string     `json:"status"`
-	Change        Change     `json:"change"`
-	OverviewPath  string     `json:"overview_path"`
-	Steps         []Step     `json:"steps"`
+	SchemaVersion int          `json:"schema_version" yaml:"schema_version"`
+	ID            string       `json:"id" yaml:"id"`
+	Repository    Repository   `json:"repository" yaml:"repository"`
+	Source        Source       `json:"source" yaml:"source"`
+	CreatedAt     string       `json:"created_at" yaml:"created_at"`
+	UpdatedAt     string       `json:"updated_at" yaml:"updated_at"`
+	Status        string       `json:"status" yaml:"status"`
+	Change        Change       `json:"change" yaml:"change"`
+	OverviewPath  string       `json:"overview_path" yaml:"overview_path"`
+	Steps         []Step       `json:"steps" yaml:"steps"`
+	Annotations   []Annotation `json:"annotations,omitempty" yaml:"annotations,omitempty"`
+	Decisions     []Decision   `json:"decisions,omitempty" yaml:"decisions,omitempty"`
 }
 
 type Repository struct {
-	Name string `json:"name"`
+	Name string `json:"name" yaml:"name"`
 }
 
 type Source struct {
-	BaseRef   string `json:"base_ref"`
-	TargetRef string `json:"target_ref"`
-	BaseSHA   string `json:"base_sha"`
-	TargetSHA string `json:"target_sha"`
+	BaseRef   string `json:"base_ref" yaml:"base_ref"`
+	TargetRef string `json:"target_ref" yaml:"target_ref"`
+	BaseSHA   string `json:"base_sha" yaml:"base_sha"`
+	TargetSHA string `json:"target_sha" yaml:"target_sha"`
 }
 
 type Change struct {
-	Title   string        `json:"title"`
-	Summary string        `json:"summary"`
-	Files   []ChangedFile `json:"files"`
+	Title   string        `json:"title" yaml:"title"`
+	Summary string        `json:"summary" yaml:"summary"`
+	Files   []ChangedFile `json:"files" yaml:"files"`
 }
 
 type ChangedFile struct {
-	Path         string `json:"path"`
-	Status       string `json:"status"`
-	PreviousPath string `json:"previous_path,omitempty"`
+	Path         string `json:"path" yaml:"path"`
+	Status       string `json:"status" yaml:"status"`
+	PreviousPath string `json:"previous_path,omitempty" yaml:"previous_path,omitempty"`
 }
 
 type Step struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Priority  string   `json:"priority"`
-	Rationale string   `json:"rationale"`
-	Files     []string `json:"files"`
-	Blocks    []Block  `json:"blocks"`
+	ID        string   `json:"id" yaml:"id"`
+	Title     string   `json:"title" yaml:"title"`
+	Priority  string   `json:"priority" yaml:"priority"`
+	Rationale string   `json:"rationale" yaml:"rationale"`
+	Files     []string `json:"files" yaml:"files"`
+	Blocks    []Block  `json:"blocks,omitempty" yaml:"blocks,omitempty"`
 }
 
 type Block struct {
-	ID        string `json:"id"`
-	Type      string `json:"type"`
-	Body      string `json:"body,omitempty"`
-	Path      string `json:"path,omitempty"`
-	View      string `json:"view,omitempty"`
-	Source    string `json:"source,omitempty"`
-	StartLine int    `json:"start_line,omitempty"`
-	EndLine   int    `json:"end_line,omitempty"`
-	Kind      string `json:"kind,omitempty"`
-	Focus     *Focus `json:"focus,omitempty"`
+	ID        string `json:"id" yaml:"id"`
+	Type      string `json:"type" yaml:"type"`
+	Body      string `json:"body,omitempty" yaml:"body,omitempty"`
+	Path      string `json:"path,omitempty" yaml:"path,omitempty"`
+	View      string `json:"view,omitempty" yaml:"view,omitempty"`
+	Source    string `json:"source,omitempty" yaml:"source,omitempty"`
+	StartLine int    `json:"start_line,omitempty" yaml:"start_line,omitempty"`
+	EndLine   int    `json:"end_line,omitempty" yaml:"end_line,omitempty"`
+	Kind      string `json:"kind,omitempty" yaml:"kind,omitempty"`
+	Focus     *Focus `json:"focus,omitempty" yaml:"focus,omitempty"`
 }
 
 type Focus struct {
-	Side      string `json:"side"`
-	StartLine int    `json:"start_line"`
-	EndLine   int    `json:"end_line,omitempty"`
+	Side      string `json:"side" yaml:"side"`
+	StartLine int    `json:"start_line" yaml:"start_line"`
+	EndLine   int    `json:"end_line,omitempty" yaml:"end_line,omitempty"`
+}
+
+type Annotation struct {
+	ID        string `json:"id" yaml:"id"`
+	Scope     string `json:"scope" yaml:"scope"`
+	Body      string `json:"body" yaml:"body"`
+	FilePath  string `json:"file_path,omitempty" yaml:"file_path,omitempty"`
+	Side      string `json:"side,omitempty" yaml:"side,omitempty"`
+	StartLine int    `json:"start_line,omitempty" yaml:"start_line,omitempty"`
+	EndLine   int    `json:"end_line,omitempty" yaml:"end_line,omitempty"`
+	CreatedAt string `json:"created_at" yaml:"created_at"`
+}
+
+type Decision struct {
+	ID        string `json:"id" yaml:"id"`
+	Summary   string `json:"summary" yaml:"summary"`
+	Status    string `json:"status" yaml:"status"`
+	Rationale string `json:"rationale,omitempty" yaml:"rationale,omitempty"`
+	CreatedAt string `json:"created_at" yaml:"created_at"`
 }
 
 type ValidationErrors struct {
@@ -123,13 +144,16 @@ func (v *Validator) Parse(source []byte) (*Review, error) {
 	if err := json.Unmarshal(jsonDocument, &document); err != nil {
 		return nil, err
 	}
-	if err := v.schema.Validate(document); err != nil {
-		return nil, &ValidationErrors{Errors: []string{err.Error()}}
-	}
-
 	var review Review
 	if err := json.Unmarshal(jsonDocument, &review); err != nil {
-		return nil, fmt.Errorf("decode validated review: %w", err)
+		return nil, fmt.Errorf("decode review: %w", err)
+	}
+	if review.SchemaVersion == 2 {
+		if err := v.schema.Validate(document); err != nil {
+			return nil, &ValidationErrors{Errors: []string{err.Error()}}
+		}
+	} else if review.SchemaVersion != 1 {
+		return nil, &ValidationErrors{Errors: []string{"schema_version must be 1 or 2"}}
 	}
 	if semanticErrors := validateSemantics(&review); len(semanticErrors) > 0 {
 		return nil, &ValidationErrors{Errors: semanticErrors}
@@ -144,6 +168,15 @@ func IsValidationError(err error) bool {
 
 func validateSemantics(review *Review) []string {
 	var found []string
+	if review.ID == "" || review.Repository.Name == "" || review.Change.Title == "" || review.Change.Summary == "" {
+		found = append(found, "review metadata must contain non-empty text")
+	}
+	if review.OverviewPath != "overview.md" {
+		found = append(found, "overview_path must be overview.md")
+	}
+	if len(review.Change.Files) == 0 || len(review.Steps) == 0 {
+		found = append(found, "change.files and steps must be non-empty")
+	}
 	changedPaths := make(map[string]bool, len(review.Change.Files))
 	for index, file := range review.Change.Files {
 		label := fmt.Sprintf("change.files[%d].path", index)
@@ -203,11 +236,30 @@ func validateSemantics(review *Review) []string {
 				}
 			}
 		}
+		if review.SchemaVersion == 2 && len(step.Blocks) == 0 {
+			found = append(found, fmt.Sprintf("steps[%d].blocks must be non-empty", stepIndex))
+		}
 	}
 
 	for changedPath := range changedPaths {
 		if !plannedPaths[changedPath] {
 			found = append(found, fmt.Sprintf("every changed file must appear in a review step; missing: %s", changedPath))
+		}
+	}
+	if review.SchemaVersion == 1 {
+		for index, annotation := range review.Annotations {
+			if annotation.ID == "" || strings.TrimSpace(annotation.Body) == "" {
+				found = append(found, fmt.Sprintf("annotations[%d] requires id and body", index))
+			}
+			if annotation.Scope != "overview" && annotation.Scope != "file" && annotation.Scope != "line" {
+				found = append(found, fmt.Sprintf("annotations[%d].scope is invalid", index))
+			}
+			if annotation.Scope != "overview" && !changedPaths[annotation.FilePath] {
+				found = append(found, fmt.Sprintf("annotations[%d].file_path references unchanged path", index))
+			}
+			if annotation.Scope == "line" && (annotation.Side != "base" && annotation.Side != "target" || annotation.StartLine < 1 || annotation.EndLine > 0 && annotation.EndLine < annotation.StartLine) {
+				found = append(found, fmt.Sprintf("annotations[%d] has an invalid line range", index))
+			}
 		}
 	}
 	return unique(found)

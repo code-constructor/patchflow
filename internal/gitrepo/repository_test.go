@@ -1,0 +1,80 @@
+package gitrepo
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestChangedFilesAndLiteralDiff(t *testing.T) {
+	directory := testRepository(t)
+	repository, err := Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _ := repository.ResolveCommit("main")
+	target, _ := repository.ResolveCommit("HEAD")
+	files, err := repository.ChangedFiles(base, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Path != "app/account.go" {
+		t.Fatalf("unexpected changed files: %#v", files)
+	}
+	diff, err := repository.Diff(base, target, "app/account.go", "")
+	if err != nil || !strings.Contains(diff, "Locked") {
+		t.Fatalf("unexpected diff: %v %s", err, diff)
+	}
+	if _, err := repository.Diff(base, target, "../secret", ""); err == nil {
+		t.Fatal("expected traversal rejection")
+	}
+}
+
+func TestDiffRejectsFilesOverDisplayLimit(t *testing.T) {
+	directory := testRepository(t)
+	writeTestFile(t, directory, "generated.js", strings.Repeat("const generated = true;\n", 100_000))
+	runTestGit(t, directory, "add", "generated.js")
+	runTestGit(t, directory, "commit", "-m", "large generated file")
+	repository, _ := Open(directory)
+	base, _ := repository.ResolveCommit("main")
+	target, _ := repository.ResolveCommit("HEAD")
+	if _, err := repository.Diff(base, target, "generated.js", ""); err == nil || !strings.Contains(err.Error(), "2 MB") {
+		t.Fatalf("expected display-limit error, got %v", err)
+	}
+}
+
+func testRepository(t *testing.T) string {
+	t.Helper()
+	directory := t.TempDir()
+	runTestGit(t, directory, "init", "-b", "main")
+	runTestGit(t, directory, "config", "user.email", "test@example.test")
+	runTestGit(t, directory, "config", "user.name", "Test")
+	writeTestFile(t, directory, "app/account.go", "package app\n")
+	runTestGit(t, directory, "add", ".")
+	runTestGit(t, directory, "commit", "-m", "base")
+	runTestGit(t, directory, "checkout", "-b", "feature")
+	writeTestFile(t, directory, "app/account.go", "package app\nfunc Locked() bool { return true }\n")
+	writeTestFile(t, directory, ".patchflow/ignored", "ignored\n")
+	runTestGit(t, directory, "add", ".")
+	runTestGit(t, directory, "commit", "-m", "target")
+	return directory
+}
+func runTestGit(t *testing.T, directory string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, output)
+	}
+}
+func writeTestFile(t *testing.T, root, relative, content string) {
+	t.Helper()
+	path := filepath.Join(root, relative)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}

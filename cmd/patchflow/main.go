@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/traqx-ai/patchflow/internal/artifact"
+	"github.com/traqx-ai/patchflow/internal/gitrepo"
+	patchreview "github.com/traqx-ai/patchflow/internal/review"
 	patchflowweb "github.com/traqx-ai/patchflow/internal/web"
 )
 
@@ -22,6 +25,8 @@ func run(arguments []string) int {
 		return 2
 	}
 	switch arguments[0] {
+	case "create":
+		return create(arguments[1:])
 	case "validate":
 		return validate(arguments[1:])
 	case "serve":
@@ -67,33 +72,64 @@ func validate(arguments []string) int {
 
 func serve(arguments []string) int {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
-	reviewPath := flags.String("review", "", "path to review.yaml")
-	repositoryPath := flags.String("repository", "", "path to the reviewed Git repository")
-	address := flags.String("addr", "127.0.0.1:4040", "listen address")
+	reviewPath := flags.String("review", "", "deprecated: path to review.yaml")
+	repositoryPath := flags.String("repository", "", "repository selected when the server starts")
+	address := flags.String("addr", "127.0.0.1:3000", "listen address")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
-	if *reviewPath == "" || flags.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "Usage: patchflow serve --review PATH/TO/review.yaml [--repository PATH] [--addr 127.0.0.1:4040]")
+	if flags.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "Usage: patchflow serve [--repository PATH] [--addr 127.0.0.1:3000]")
 		return 2
 	}
-
-	review, err := loadReview(*reviewPath)
+	if *repositoryPath == "" && *reviewPath != "" {
+		*repositoryPath = repositoryFromReviewPath(*reviewPath)
+	}
+	handler, err := patchflowweb.NewApp(*repositoryPath, nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	handler, err := patchflowweb.NewHandler(review, *reviewPath, *repositoryPath)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	fmt.Printf("Patchflow reader listening on http://%s\n", *address)
+	fmt.Printf("Patchflow listening on http://%s\n", *address)
 	if err := http.ListenAndServe(*address, handler); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
+}
+
+func create(arguments []string) int {
+	flags := flag.NewFlagSet("create", flag.ContinueOnError)
+	repositoryPath := flags.String("repository", "", "path to the reviewed Git repository")
+	baseRef := flags.String("base", "main", "base Git ref")
+	targetRef := flags.String("target", "HEAD", "target Git ref")
+	format := flags.String("format", "text", "output format: text or json")
+	if err := flags.Parse(arguments); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *repositoryPath == "" || (*format != "text" && *format != "json") {
+		fmt.Fprintln(os.Stderr, "Usage: patchflow create --repository PATH [--base main] [--target HEAD] [--format text|json]")
+		return 2
+	}
+	repository, err := gitrepo.Open(*repositoryPath)
+	if err == nil {
+		var store *patchreview.Store
+		store, err = patchreview.NewStore(repository.Root(), nil)
+		if err == nil {
+			var stored *patchreview.Stored
+			stored, err = (&patchreview.Creator{Repository: repository, Store: store}).Create(*baseRef, *targetRef)
+			if err == nil {
+				if *format == "json" {
+					_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"id": stored.Review.ID, "path": stored.Path})
+				} else {
+					fmt.Printf("Created Patchflow review %s at %s\n", stored.Review.ID, stored.Path)
+				}
+				return 0
+			}
+		}
+	}
+	fmt.Fprintln(os.Stderr, err)
+	return 1
 }
 
 func loadReview(path string) (*artifact.Review, error) {
@@ -109,5 +145,16 @@ func loadReview(path string) (*artifact.Review, error) {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: patchflow <validate|serve> [options]")
+	fmt.Fprintln(os.Stderr, "Usage: patchflow <create|validate|serve> [options]")
+}
+
+func repositoryFromReviewPath(reviewPath string) string {
+	directory := filepath.Dir(reviewPath)
+	for directory != filepath.Dir(directory) {
+		if filepath.Base(directory) == ".patchflow" {
+			return filepath.Dir(directory)
+		}
+		directory = filepath.Dir(directory)
+	}
+	return ""
 }

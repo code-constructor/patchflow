@@ -1,0 +1,6 @@
+{{define "content"}}
+<div class="breadcrumb"><a href="/reviews/{{.Chapter.ReviewID}}">← Review overview</a></div>
+<section class="row row--between"><div><div class="eyebrow">Step {{.Chapter.Number}} of {{.Chapter.Total}}</div><h2>{{.Chapter.Title}}</h2><p class="lede">{{.Chapter.Rationale}}</p></div><span class="priority priority--{{.Chapter.Priority}}">{{.Chapter.Priority}} priority</span></section>
+<main class="review-chapter section">{{range .Chapter.Blocks}}{{template "block" .}}{{end}}</main>
+<nav class="step-nav"><div>{{if .Chapter.Previous}}<a class="button button--quiet" href="/reviews/{{.Chapter.ReviewID}}/steps/{{.Chapter.Previous.ID}}">← {{.Chapter.Previous.Title}}</a>{{end}}</div><div>{{if .Chapter.Next}}<a class="button" href="/reviews/{{.Chapter.ReviewID}}/steps/{{.Chapter.Next.ID}}">{{.Chapter.Next.Title}} →</a>{{end}}</div></nav>
+{{end}}

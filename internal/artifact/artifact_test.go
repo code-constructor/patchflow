@@ -44,3 +44,21 @@ func TestSharedV2Fixtures(t *testing.T) {
 		})
 	}
 }
+
+func TestDocumentedV1FixtureRemainsReadable(t *testing.T) {
+	validator, err := NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.ReadFile(filepath.Join("..", "..", "docs", "examples", "review.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := validator.Parse(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review.SchemaVersion != 1 || len(review.Annotations) != 1 || len(review.Steps) != 3 {
+		t.Fatalf("unexpected v1 review: %#v", review)
+	}
+}

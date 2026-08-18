@@ -1,8 +1,5 @@
 .git
-.bundle
+.patchflow
 .env*
-config/*.key
-log/*
-storage/*
-tmp/*
+patchflow
 vendor/bundle

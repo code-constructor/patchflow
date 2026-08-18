@@ -3,8 +3,8 @@
 Artifact v2 turns every review step into an ordered, agent-authored chapter.
 The canonical machine-readable contract is
 [`schema/patchflow-review-v2.schema.json`](../schema/patchflow-review-v2.schema.json).
-Patchflow's Ruby and Go validators both use that exact file and share the
-fixtures under `testdata/artifacts/v2`.
+Patchflow's Go validator embeds that exact file and checks the shared fixtures
+under `testdata/artifacts/v2`.
 
 ## Directory layout
 
@@ -91,9 +91,8 @@ In addition to JSON Schema validation:
 - all paths are normalized and relative, contain no traversal or backslashes,
   and repository paths stay outside `.patchflow`.
 
-Validate with either implementation:
+Validate with the canonical CLI:
 
 ```sh
 bin/patchflow validate --format json /path/to/review.yaml
-bin/patchflow-go validate --format json /path/to/review.yaml
 ```

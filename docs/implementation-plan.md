@@ -12,7 +12,7 @@ a committed base branch from beginning to end:
 5. Compose each step from ordered prose, code, diff, callout, question, and
    diagram blocks.
 6. Render syntax-highlighted split and unified diffs inside that narrative.
-7. Validate the same artifact contract and fixtures in Ruby and Go.
+7. Validate the artifact contract and fixtures in the Go runtime.
 8. Provide a Coding Agent skill that can create and enrich the same artifact.
 
 This slice intentionally supports committed text changes in local repositories.
@@ -21,8 +21,8 @@ binary viewers, large-diff virtualization, and multi-user review are later work.
 
 ## Architecture boundaries
 
-- The review artifact is the source of truth. SQLite may hold local convenience
-  state, but not the durable review itself.
+- The review artifact is the source of truth. Patchflow has no application
+  database; repository selection is a local browser cookie.
 - Git commands live behind a service boundary and receive argument arrays, not
   shell-interpolated commands.
 - Refs resolve to SHAs before diffing. Artifacts never silently follow a moving
@@ -34,9 +34,8 @@ binary viewers, large-diff virtualization, and multi-user review are later work.
   deterministic baseline; a Coding Agent can replace it with a richer plan by
   producing the same artifact format.
 - Generated `.patchflow` content is excluded from the reviewed diff by default.
-- Rails, the Go command, the schema, fixtures, documentation, and Coding Agent
-  skill live in one monorepo. The JSON Schema is embedded into Go and read from
-  the same path by Rails.
+- The Go application, schema, fixtures, documentation, embedded frontend, and
+  Coding Agent skill live in one monorepo.
 
 ## Delivery steps
 
@@ -73,16 +72,22 @@ Replace the file-only chapter body with ordered narrative building blocks.
 Keep v1 annotation support for old artifacts, but leave interaction and replies
 out of v2 until the block language is proven.
 
-### 7. Shared Ruby and Go contract — complete
+### 7. Go artifact runtime and web application — complete
 
-Validate shared valid and invalid fixtures against the canonical JSON Schema and
-semantic rules in both implementations. Provide a self-contained Go reader as
-an alternative local runtime.
+Validate fixtures against the canonical JSON Schema and semantic rules. Run the
+complete repository selection, review creation, validation, and book-style UI
+from one self-contained Go binary.
 
 ### 8. Coding Agent skill — complete
 
 Teach `.agents/skills/create-patchflow-review` to compose the v2 block language,
 avoid changing reviewed source files, and validate its result.
+
+### 9. Rails-to-Go consolidation — complete
+
+Remove the transitional Rails, Ruby, SQLite, and dual-runtime code. Serve typed
+standard-library templates enhanced by Turbo and Stimulus, native ES modules,
+plain CSS, and embedded browser dependencies without Node or a build pipeline.
 
 ## Acceptance scenario
 
