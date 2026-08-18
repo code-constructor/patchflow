@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export GOFLAGS="${GOFLAGS:+${GOFLAGS} }-mod=mod"
+
+if (( $# > 0 )); then
+  exec go doc -all -u "$@"
+fi
+
+while IFS= read -r package; do
+  printf '\n# %s\n\n' "${package}"
+  go doc -all -u "${package}"
+done < <(go list ./...)

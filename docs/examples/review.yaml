@@ -1,0 +1,52 @@
+schema_version: 1
+id: 20260818-153000-a1b2c3d4
+repository:
+  name: sample-app
+source:
+  base_ref: main
+  target_ref: feature/session-timeout
+  base_sha: "1111111111111111111111111111111111111111"
+  target_sha: a1b2c3d4e5f6789012345678901234567890abcd
+created_at: "2026-08-18T15:30:00Z"
+updated_at: "2026-08-18T15:30:00Z"
+status: draft
+change:
+  title: Review feature/session-timeout against main
+  summary: 3 changed files grouped into 3 review steps.
+  files:
+    - path: app/models/session.rb
+      status: modified
+    - path: app/controllers/sessions_controller.rb
+      status: modified
+    - path: test/models/session_test.rb
+      status: added
+overview_path: overview.md
+steps:
+  - id: domain-model
+    title: Understand session expiry
+    priority: high
+    rationale: The model owns the new timeout rule used by the rest of the change.
+    files:
+      - app/models/session.rb
+  - id: request-flow
+    title: Follow the request path
+    priority: high
+    rationale: The controller applies the timeout rule at the user-facing boundary.
+    files:
+      - app/controllers/sessions_controller.rb
+  - id: verification
+    title: Verify expected behavior
+    priority: medium
+    rationale: The tests document the intended boundary conditions.
+    files:
+      - test/models/session_test.rb
+annotations:
+  - id: note-1
+    scope: line
+    body: Confirm whether an expired session should preserve the return URL.
+    file_path: app/controllers/sessions_controller.rb
+    side: target
+    start_line: 18
+    end_line: 18
+    created_at: "2026-08-18T15:35:00Z"
+decisions: []

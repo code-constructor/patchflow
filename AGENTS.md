@@ -19,8 +19,7 @@ change and understood later.
   hosted service, account system, or network dependency without an explicit
   product decision.
 - Git-native: review artifacts belong in the target project and are intended to
-  be versioned in Git. SQLite is the only persistence layer Patchflow itself
-  needs at this stage.
+  be versioned in Git. Patchflow needs no application database at this stage.
 - Agent-guided, human-controlled: agents propose review order, explanations,
   and annotations; the human remains able to inspect, amend, and decide.
 - Explain before critique: prioritize model/domain logic, security-sensitive
@@ -29,6 +28,10 @@ change and understood later.
 - Preserve evidence: artifacts must record the exact base and target commit
   SHAs they describe. A changed target is stale and requires a new or revised
   review artifact.
+- Addressable by default: every narrative block has a stable semantic ID.
+  Resource identity belongs in URL paths, shareable presentation state in query
+  parameters, and an addressed block directly in its own resource path. Do not
+  hide shareable UI state in application storage.
 
 ## Initial Product Scope
 
@@ -38,12 +41,12 @@ Build a vertical slice before recreating a full GitHub-like diff viewer:
 2. Create and validate a machine-readable review artifact.
 3. Render a review overview with an ordered set of review steps.
 4. Show a simple unified text diff in the planned order.
-5. Support overview, file, and line/range annotations.
-6. Render Markdown and Mermaid diagrams in review documentation.
+5. Compose chapters from prose, code, diff, callout, question, diagram, and
+   takeaway blocks. Interactive comments are intentionally deferred.
+6. Render Markdown, Mermaid, syntax-highlighted code, and split/unified diffs.
 
-Split diffs, large-diff virtualization, GitHub PR import, notebook/image
-viewers, and elaborate keyboard navigation are later capabilities, not
-prerequisites for the first usable version.
+Large-diff virtualization, GitHub PR import, notebook/image viewers, and
+elaborate keyboard navigation are later capabilities.
 
 ## Artifact Direction
 
@@ -59,29 +62,43 @@ Use a repository-local convention such as:
 
 `review.yaml` is the machine-readable source of truth. It should capture a
 schema version, immutable source refs, change summary, ordered review steps,
-priority rationale, annotations, decisions, and review status. Mermaid source
-belongs in the artifact directory rather than existing only as rendered output.
+priority rationale, narrative blocks, and review status. Mermaid source belongs
+in the artifact directory rather than existing only as rendered output. Legacy
+v1 annotations and decisions remain readable; v2 deliberately omits them.
 
 Patchflow must avoid reviewing its own generated review artifact by default.
 
 ## Technical Direction
 
-- Rails 8.1, Ruby 3.4, SQLite.
-- Use Rails conventions, Hotwire/Turbo, Stimulus, Importmap, and server-rendered
-  HTML by default.
-- Prefer Rails and browser-native capabilities over adding a JavaScript framework.
-- The Rails defaults for Solid Cache, Solid Queue, and Solid Cable are acceptable
-  because they remain local and SQLite-backed. Do not require Redis, PostgreSQL,
-  Docker, or a cloud service for the initial product.
-- Use small service objects for Git access, artifact parsing, and plan generation;
-  do not let controllers own Git commands or filesystem policy.
+- Go 1.24+ with the standard library HTTP server and `html/template`.
+- Use server-rendered HTML, Turbo, Stimulus, native ES modules, an Import Map,
+  plain CSS, and `go:embed`. Do not add Node, Vite, or a frontend build pipeline.
+- Prefer small packages for Git access, artifact parsing, persistence, plan
+  generation, and HTTP rendering; handlers do not own Git commands or
+  filesystem policy.
+- Ship the application as one self-contained binary with embedded templates and
+  browser assets. Do not require a database, Redis, Docker, or a cloud service.
 - Treat all filesystem paths from requests or artifacts as untrusted. Resolve
   them relative to the selected repository and reject traversal outside it.
+- Keep semantic review content in Git-native artifacts. Use URLs for navigation,
+  focus, and presentation state; never encode review prose or absolute local
+  paths into shareable URLs.
+- Keep visual design values behind the semantic CSS tokens in `:root`. Add or
+  override palette, typography, surface, border, radius, shadow, and layout
+  tokens instead of scattering literal theme values across components.
 
 ## Working Agreement
 
-- Keep the application runnable with `bin/rails` and SQLite alone.
-- Add focused tests for new behavior. Run `bin/rails test` before handoff.
-- Do not commit `vendor/bundle`, SQLite database files, logs, temporary files,
-  or machine-specific configuration.
+- Keep the application runnable with `bin/patchflow` and Git alone.
+- Document every named function and method, including unexported helpers and
+  tests. Go Doc comments start with the declared name and explain purpose,
+  contract, or important side effects instead of restating the implementation.
+  Browser-controller methods follow the same rule with concise JSDoc comments.
+- Keep `bin/docs` working so the complete Go package documentation can always
+  be rendered from source with standard Go tooling.
+- Add focused tests for new behavior. Run `bin/ci` before handoff.
+- Do not commit compiled binaries, temporary files, or machine-specific
+  configuration.
 - Make product decisions and artifact-schema changes visible in committed docs.
+- Follow `docs/review-composition.md` when generating or changing the narrative
+  structure of a review.

@@ -1,0 +1,30 @@
+schema_version: 2
+id: code-range-too-large
+repository: { name: example-app }
+source:
+  base_ref: main
+  target_ref: HEAD
+  base_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  target_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+created_at: "2026-08-18T15:30:00Z"
+updated_at: "2026-08-18T15:30:00Z"
+status: draft
+change:
+  title: Oversized code range
+  summary: This fixture must fail semantic validation.
+  files:
+    - { path: app/models/account.rb, status: modified }
+overview_path: overview.md
+steps:
+  - id: domain
+    title: Domain
+    priority: high
+    rationale: Explain the domain change.
+    files: [app/models/account.rb]
+    blocks:
+      - id: oversized-context
+        type: code
+        path: app/models/account.rb
+        source: target
+        start_line: 1
+        end_line: 501

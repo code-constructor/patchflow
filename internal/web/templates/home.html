@@ -1,0 +1,27 @@
+{{define "content"}}
+{{if .Repository}}
+  <section class="row row--between">
+    <div><div class="eyebrow">Local repository</div><h2>{{.Repository.Name}}</h2><div class="repo-path">{{.Repository.Path}}</div></div>
+    <div class="button-row"><a href="/reviews/new" class="button">New review</a><form action="/repository/close" method="post"><button class="button button--quiet">Close repository</button></form></div>
+  </section>
+  <section class="section"><h2>Reviews</h2>
+    {{if .Reviews}}<div class="review-list">{{range $index, $review := .Reviews}}<a href="/reviews/{{$review.ID}}" class="review-link"><span class="step-number">{{add $index 1}}</span><span><strong>{{$review.Title}}</strong><br><span class="small muted">{{$review.Summary}}</span></span><span class="status">{{$review.Status}}</span></a>{{end}}</div>
+    {{else}}<div class="card"><p>No review artifacts found in this repository yet.</p><a href="/reviews/new" class="button">Create the first review</a></div>{{end}}
+  </section>
+{{else}}
+  <section class="hero"><div class="eyebrow">Agent-guided code review</div><h1>Review code in the order that builds understanding.</h1><p class="lede">Patchflow turns a committed local Git diff into an explicit review plan and preserves the result as documentation in the reviewed repository.</p></section>
+  <section class="card narrow" data-controller="repository-picker" data-repository-picker-root-value="{{.PickerRoot}}">
+    <h2>Open a repository</h2>
+    <form action="/repository" method="post" class="stack">
+      <label>Local path<span class="path-picker-field"><input name="repository_path" value="{{.RepositoryPath}}" required autocomplete="off" data-repository-picker-target="input"><button type="button" class="button button--quiet" data-action="repository-picker#open">Browse…</button></span></label>
+      <div><button class="button">Open repository</button></div>
+    </form>
+    <dialog class="repository-picker" data-repository-picker-target="dialog" data-action="click->repository-picker#dismiss">
+      <div class="repository-picker__chrome">
+        <button type="button" class="repository-picker__close" aria-label="Close repository browser" data-action="repository-picker#close">×</button>
+        <turbo-frame id="repository-picker-frame" data-repository-picker-target="frame"><div class="repository-picker__loading">Loading directories…</div></turbo-frame>
+      </div>
+    </dialog>
+  </section>
+{{end}}
+{{end}}

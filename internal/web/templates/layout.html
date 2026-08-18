@@ -1,0 +1,25 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="application-name" content="Patchflow">
+    <title>{{.Title}}</title>
+    <link rel="stylesheet" href="/assets/styles/application.css" data-turbo-track="reload">
+    <script type="importmap">{"imports":{"@hotwired/stimulus":"/assets/vendor/stimulus.js","dompurify":"/assets/vendor/dompurify.js","marked":"/assets/vendor/marked.js"}}</script>
+    <script src="/assets/vendor/mermaid.js" defer data-turbo-track="reload"></script>
+    <script src="/assets/vendor/diff2html.min.js" defer data-turbo-track="reload"></script>
+    <script type="module" src="/assets/application.js" data-turbo-track="reload"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a href="/" class="brand"><span class="brand-mark">P</span><span>Patchflow</span></a>
+      {{if .RepositoryName}}<span class="repository-chip">{{.RepositoryName}}</span>{{end}}
+    </header>
+    <main class="page-shell">
+      {{if .Notice}}<div class="flash">{{.Notice}}</div>{{end}}
+      {{if .Alert}}<div class="flash flash--alert">{{.Alert}}</div>{{end}}
+      {{template "content" .}}
+    </main>
+  </body>
+</html>{{end}}

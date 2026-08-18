@@ -1,0 +1,25 @@
+schema_version: 2
+id: unsafe-path
+repository: { name: example-app }
+source:
+  base_ref: main
+  target_ref: HEAD
+  base_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  target_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+created_at: "2026-08-18T15:30:00Z"
+updated_at: "2026-08-18T15:30:00Z"
+status: draft
+change:
+  title: Unsafe path
+  summary: This fixture must fail semantic validation.
+  files:
+    - { path: ../secrets.txt, status: modified }
+overview_path: overview.md
+steps:
+  - id: domain
+    title: Domain
+    priority: high
+    rationale: Explain the domain change.
+    files: [../secrets.txt]
+    blocks:
+      - { id: unsafe-diff, type: diff, path: ../secrets.txt }

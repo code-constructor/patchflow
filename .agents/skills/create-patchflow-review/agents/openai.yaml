@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Patchflow Review"
+  short_description: "Create validated, agent-guided review artifacts"
+  default_prompt: "Use $create-patchflow-review to create a review artifact for the current branch against main."

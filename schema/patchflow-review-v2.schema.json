@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchflow.dev/schema/patchflow-review-v2.schema.json",
+  "title": "Patchflow Review Artifact v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "repository",
+    "source",
+    "created_at",
+    "updated_at",
+    "status",
+    "change",
+    "overview_path",
+    "steps"
+  ],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "id": { "$ref": "#/$defs/id" },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/$defs/text" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_ref", "target_ref", "base_sha", "target_sha"],
+      "properties": {
+        "base_ref": { "$ref": "#/$defs/text" },
+        "target_ref": { "$ref": "#/$defs/text" },
+        "base_sha": { "$ref": "#/$defs/sha" },
+        "target_sha": { "$ref": "#/$defs/sha" }
+      }
+    },
+    "created_at": { "$ref": "#/$defs/timestamp" },
+    "updated_at": { "$ref": "#/$defs/timestamp" },
+    "status": { "enum": ["draft", "in_review", "completed", "stale"] },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "summary", "files"],
+      "properties": {
+        "title": { "$ref": "#/$defs/text" },
+        "summary": { "$ref": "#/$defs/text" },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/changed_file" }
+        }
+      }
+    },
+    "overview_path": { "const": "overview.md" },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/step" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "changed_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "status"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "status": {
+          "enum": ["added", "modified", "deleted", "renamed", "copied", "type_changed", "unmerged", "unknown"]
+        },
+        "previous_path": { "$ref": "#/$defs/path" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "enum": ["renamed", "copied"] } },
+            "required": ["status"]
+          },
+          "then": { "required": ["previous_path"] },
+          "else": { "not": { "required": ["previous_path"] } }
+        }
+      ]
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "priority", "rationale", "files", "blocks"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "title": { "$ref": "#/$defs/text" },
+        "priority": { "enum": ["critical", "high", "medium", "low"] },
+        "rationale": { "$ref": "#/$defs/text" },
+        "review_question": { "$ref": "#/$defs/text" },
+        "attention": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["design", "behavior", "data", "security", "reliability", "performance", "ux", "operations", "verification", "documentation", "mechanical"]
+          }
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/path" }
+        },
+        "blocks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              { "$ref": "#/$defs/prose_block" },
+              { "$ref": "#/$defs/diff_block" },
+              { "$ref": "#/$defs/code_block" },
+              { "$ref": "#/$defs/callout_block" },
+              { "$ref": "#/$defs/question_block" },
+              { "$ref": "#/$defs/diagram_block" },
+              { "$ref": "#/$defs/takeaway_block" }
+            ]
+          }
+        }
+      }
+    },
+    "focus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["side", "start_line"],
+      "properties": {
+        "side": { "enum": ["base", "target"] },
+        "start_line": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "prose_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "body"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "prose" },
+        "body": { "$ref": "#/$defs/text" }
+      }
+    },
+    "diff_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "path"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "diff" },
+        "path": { "$ref": "#/$defs/path" },
+        "view": { "enum": ["split", "unified"] },
+        "focus": { "$ref": "#/$defs/focus" },
+        "collapsed": { "type": "boolean" }
+      }
+    },
+    "code_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "path", "source", "start_line", "end_line"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "code" },
+        "path": { "$ref": "#/$defs/path" },
+        "source": { "enum": ["base", "target"] },
+        "start_line": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "callout_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "kind", "body"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "callout" },
+        "kind": { "enum": ["insight", "risk", "warning", "assumption", "uncertainty"] },
+        "body": { "$ref": "#/$defs/text" }
+      }
+    },
+    "question_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "body"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "question" },
+        "body": { "$ref": "#/$defs/text" }
+      }
+    },
+    "takeaway_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "body"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "takeaway" },
+        "body": { "$ref": "#/$defs/text" }
+      }
+    },
+    "diagram_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "path"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "diagram" },
+        "path": { "$ref": "#/$defs/path" }
+      }
+    }
+  }
+}
