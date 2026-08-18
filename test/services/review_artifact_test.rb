@@ -9,6 +9,26 @@ class ReviewArtifactTest < ActiveSupport::TestCase
     assert_equal "line", artifact.annotations.first.fetch("scope")
   end
 
+  test "loads the shared valid v2 fixture" do
+    artifact = Patchflow::ReviewArtifact.load(Rails.root.join("testdata/artifacts/v2/valid/review.yaml"))
+
+    assert_equal 2, artifact.schema_version
+    assert artifact.blocks?
+    assert_equal %w[prose code diff callout question], artifact.steps.first.fetch("blocks").pluck("type")
+    assert_empty artifact.annotations
+  end
+
+  test "rejects every shared invalid v2 fixture" do
+    fixtures = Rails.root.glob("testdata/artifacts/v2/invalid/*.yaml")
+
+    assert fixtures.any?
+    fixtures.each do |fixture|
+      assert_raises(Patchflow::InvalidReviewArtifact, fixture.basename.to_s) do
+        Patchflow::ReviewArtifact.load(fixture)
+      end
+    end
+  end
+
   test "rejects paths outside the reviewed repository" do
     data = YAML.safe_load(File.read(Rails.root.join("docs/examples/review.yaml")), aliases: false)
     data.dig("change", "files").first["path"] = "../secrets.txt"

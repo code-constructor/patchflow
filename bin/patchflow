@@ -2,17 +2,28 @@
 
 require "optparse"
 require_relative "../config/environment"
+require "json"
 
 def main
   command = ARGV.shift
 
   case command
   when "validate"
+    options = { format: "text" }
+    parser = OptionParser.new do |arguments|
+      arguments.banner = "Usage: bin/patchflow validate [--format text|json] PATH/TO/review.yaml"
+      arguments.on("--format FORMAT", %w[text json], "Output format (default: text)") { |value| options[:format] = value }
+    end
+    parser.parse!(ARGV)
     path = ARGV.shift
-    abort "Usage: bin/patchflow validate PATH/TO/review.yaml" unless path && ARGV.empty?
+    abort parser.to_s unless path && ARGV.empty?
 
     artifact = Patchflow::ReviewArtifact.load(File.expand_path(path))
-    puts "Valid Patchflow review #{artifact.id} (schema v#{artifact.data.fetch('schema_version')})"
+    if options.fetch(:format) == "json"
+      puts JSON.generate(valid: true, id: artifact.id, schema_version: artifact.schema_version)
+    else
+      puts "Valid Patchflow review #{artifact.id} (schema v#{artifact.schema_version})"
+    end
   when "create"
     options = { base_ref: "main", target_ref: "HEAD" }
     parser = OptionParser.new do |arguments|
@@ -35,10 +46,17 @@ def main
     abort <<~USAGE
       Usage:
         bin/patchflow create --repository PATH [--base REF] [--target REF]
-        bin/patchflow validate PATH/TO/review.yaml
+        bin/patchflow validate [--format text|json] PATH/TO/review.yaml
     USAGE
   end
-rescue Patchflow::GitError, Patchflow::EmptyGitDiff, Patchflow::InvalidReviewArtifact, Patchflow::UnsafeReviewPath, OptionParser::ParseError => error
+rescue Patchflow::InvalidReviewArtifact => error
+  if command == "validate" && options&.fetch(:format, nil) == "json"
+    puts JSON.generate(valid: false, errors: error.errors)
+  else
+    warn error.message
+  end
+  exit 1
+rescue Patchflow::GitError, Patchflow::EmptyGitDiff, Patchflow::UnsafeReviewPath, OptionParser::ParseError => error
   warn error.message
   exit 1
 end

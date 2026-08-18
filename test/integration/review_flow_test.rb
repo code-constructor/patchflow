@@ -12,7 +12,7 @@ class ReviewFlowTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "creates, renders, annotates, and reloads a local review artifact" do
+  test "creates and renders a block-based local review artifact" do
     with_feature_repository do |directory|
       post repository_path, params: { repository_path: directory }
       assert_redirected_to new_review_path
@@ -35,24 +35,8 @@ class ReviewFlowTest < ActionDispatch::IntegrationTest
       assert_includes response.body, "Split"
       assert_includes response.body, "Unified"
       assert_includes response.body, step.fetch("files").first
-
-      file_path = step.fetch("files").first
-      post review_annotations_path(artifact.id), params: {
-        step_id: step.fetch("id"),
-        annotation: {
-          scope: "line",
-          body: "Verify this boundary.",
-          file_path: file_path,
-          side: "target",
-          start_line: "2",
-          end_line: "2"
-        }
-      }
-      assert_redirected_to review_step_path(artifact.id, step.fetch("id"))
-
-      reloaded = Patchflow::ReviewStore.new(directory).find(artifact.id)
-      assert_equal "Verify this boundary.", reloaded.annotations.last.fetch("body")
-      assert_equal 2, reloaded.annotations.last.fetch("start_line")
+      assert_includes response.body, "review-chapter"
+      assert_not_includes response.body, "Save annotation"
     end
   end
 
@@ -74,6 +58,44 @@ class ReviewFlowTest < ActionDispatch::IntegrationTest
       assert_includes response.body, "Diff not displayed"
       assert_includes response.body, "exceeds the current 2 MB display limit"
       assert_includes response.body, "Scan generated and vendored files"
+    end
+  end
+
+  test "renders every v2 narrative block from repository and artifact sources" do
+    with_feature_repository do |directory|
+      post repository_path, params: { repository_path: directory }
+      post reviews_path, params: { base_ref: "main", target_ref: "HEAD" }
+
+      store = Patchflow::ReviewStore.new(directory)
+      artifact = store.all.first
+      step = artifact.steps.first
+      path = step.fetch("files").first
+      step.fetch("blocks").prepend(
+        {
+          "id" => "context-code",
+          "type" => "code",
+          "path" => path,
+          "source" => "target",
+          "start_line" => 1,
+          "end_line" => 3
+        }
+      )
+      step.fetch("blocks").push(
+        { "id" => "locking-risk", "type" => "callout", "kind" => "risk", "body" => "The lock is **always active**." },
+        { "id" => "locking-question", "type" => "question", "body" => "Where will the lock be released?" },
+        { "id" => "locking-flow", "type" => "diagram", "path" => "diagrams/locking.mmd" }
+      )
+      write_repository_file(directory, ".patchflow/reviews/#{artifact.id}/diagrams/locking.mmd", "flowchart LR\n  A --> B\n")
+      store.update(artifact)
+
+      get review_step_path(artifact.id, step.fetch("id"))
+
+      assert_response :success
+      assert_includes response.body, "code-excerpt"
+      assert_includes response.body, "always active"
+      assert_includes response.body, "Open question"
+      assert_includes response.body, "Where will the lock be released?"
+      assert_includes response.body, "flowchart LR"
     end
   end
 end

@@ -192,6 +192,22 @@ textarea { min-height: 92px; resize: vertical; }
 .annotation { padding: 12px 14px; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: #f1f5f1; }
 .annotation p { margin: 4px 0 0; }
 .annotation-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.review-chapter { width: min(100%, 980px); margin-inline: auto; }
+.review-block + .review-block { margin-top: 30px; }
+.review-block--prose { width: min(760px, 100%); margin-inline: auto; font-size: 17px; }
+.callout, .review-question { width: min(820px, 100%); margin-inline: auto; padding: 18px 20px; border-radius: 12px; }
+.callout { border-left: 4px solid var(--accent); background: var(--accent-soft); }
+.callout--risk, .callout--warning, .callout--uncertainty { border-left-color: var(--warning); background: var(--warning-soft); }
+.review-question { border: 1px solid #c8d7e8; border-left: 4px solid #45607e; background: #eef4fa; }
+.callout .markdown p, .review-question .markdown p { margin: 6px 0 0; }
+.code-card { padding: 0; overflow: hidden; }
+.code-card__header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.focus-label { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.code-card .diff-viewer { margin-top: 0; border: 0; border-radius: 0; }
+.code-excerpt { overflow-x: auto; padding: 8px 0; color: var(--code-ink); background: var(--code); font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.code-excerpt__line { display: grid; grid-template-columns: 64px max-content; min-height: 20px; }
+.code-excerpt__number { padding: 0 14px; color: #829189; text-align: right; user-select: none; }
+.code-excerpt code { padding-right: 20px; white-space: pre; }
 .line-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .breadcrumb { margin-bottom: 20px; color: var(--muted); font-size: 13px; }
 .step-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 28px; }

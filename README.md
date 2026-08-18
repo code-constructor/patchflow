@@ -6,13 +6,13 @@ instead of presenting every changed file in Git's default order.
 
 An agent summarizes the change, identifies important execution and domain
 paths, and proposes an order that builds understanding. The reviewer remains in
-control: they can inspect the underlying diff, amend the plan, annotate the
-change, and make the final decisions.
+control: they can inspect the underlying diff, amend the plan, and make the
+final decisions.
 
 Patchflow treats the result of a review as durable project documentation. The
-plan, explanations, diagrams, annotations, findings, and decisions are stored
-inside the reviewed repository so they can be committed alongside the code and
-understood later.
+plan, explanations, diagrams, and review questions are stored inside the
+reviewed repository so they can be committed alongside the code and understood
+later.
 
 > [!NOTE]
 > Patchflow is in early development. The first local end-to-end review workflow
@@ -35,8 +35,9 @@ critiqued.
 1. Select a diff in a local Git repository.
 2. Resolve and record the exact base and target commit SHAs.
 3. Let an agent explain the change and propose an ordered review plan.
-4. Review a syntax-highlighted split or unified diff in that planned order.
-5. Add overview, file, and line or range annotations.
+4. Read an agent-composed chapter built from prose, code, diff, callout,
+   question, and diagram blocks.
+5. Review syntax-highlighted split or unified diffs in that planned order.
 6. Preserve the resulting documentation as a repository-local review artifact.
 
 The commit SHAs are part of the evidence. If the target changes, the existing
@@ -57,9 +58,10 @@ The repository-local convention is:
 
 `review.yaml` is the machine-readable source of truth. It contains the
 schema version, immutable source refs, change summary, ordered review steps,
-priority rationales, annotations, decisions, and review status. Markdown and
-Mermaid source remain part of the artifact instead of existing only as rendered
-UI state.
+priority rationales, narrative blocks, and review status. Markdown and Mermaid
+source remain part of the artifact instead of existing only as rendered UI
+state. Artifact v2 deliberately leaves interactive comments out while the
+chapter language is established; v1 artifacts remain readable.
 
 Generated `.patchflow` artifacts are excluded from the diff under review by
 default, preventing Patchflow from reviewing its own output.
@@ -70,9 +72,8 @@ The initial vertical slice focuses on:
 
 - selecting a local Git diff and resolving its source commits;
 - creating and validating a machine-readable review artifact;
-- rendering an overview with ordered review steps;
+- rendering an overview with ordered, block-based review chapters;
 - displaying syntax-highlighted split and unified diffs in the planned order;
-- supporting overview, file, and line or range annotations; and
 - rendering Markdown and Mermaid diagrams.
 
 Large-diff virtualization, GitHub pull-request import, specialized notebook or
@@ -82,11 +83,13 @@ placeholder so they do not block the rest of a review step.
 
 ## Technical foundation
 
-- Ruby 3.4 and Rails 8.1
+- one monorepo containing Ruby 3.4 / Rails 8.1 and a Go 1.24+ command;
+- one JSON Schema and one fixture suite shared by both implementations;
 - SQLite for application data, cache, jobs, and Action Cable
 - Server-rendered HTML with Hotwire, Turbo, and Stimulus
 - Importmap for JavaScript dependencies
 - Diff2Html and Rouge for local diff rendering and syntax highlighting
+- an embedded-schema Go validator and local HTTP reader
 
 Patchflow is designed to run on the developer's machine. The initial product
 does not require an account, hosted service, Redis, PostgreSQL, Docker, or a
@@ -100,6 +103,7 @@ Prerequisites:
 - Bundler
 - Git
 - SQLite 3
+- Go 1.24 or newer when developing the Go command
 
 Install dependencies, prepare the local databases, and start the application:
 
@@ -168,6 +172,20 @@ bin/patchflow validate \
   /absolute/path/to/repository/.patchflow/reviews/<review-id>/review.yaml
 ```
 
+The Go implementation validates the same artifact and can start a standalone
+reader without Rails:
+
+```sh
+bin/patchflow-go validate --format json /absolute/path/to/review.yaml
+bin/patchflow-go serve \
+  --review /absolute/path/to/review.yaml \
+  --repository /absolute/path/to/repository
+```
+
+The reader listens on <http://127.0.0.1:4040>. Build a single binary with
+`GOFLAGS=-mod=mod go build -o patchflow ./cmd/patchflow`. The explicit module
+mode avoids treating Rails' existing `vendor/` directory as a Go vendor tree.
+
 The repository also contains the Coding Agent skill
 `create-patchflow-review` under `.agents/skills/`. It can analyze the committed
 diff and enrich the baseline summary, review order, rationales, and Mermaid
@@ -187,6 +205,8 @@ Run the complete local CI pipeline, including formatting and security checks:
 bin/ci
 ```
 
+Run only the Go format, vet, and shared-fixture tests with `bin/go-ci`.
+
 ## Design constraints
 
 - **Local first:** network-backed features require an explicit product decision.
@@ -197,5 +217,5 @@ bin/ci
 - **Evidence preserving:** artifacts are tied to immutable commit SHAs.
 - **Safe by default:** filesystem paths are untrusted and must never escape the
   selected repository.
-- **Rails native:** prefer Rails and browser capabilities over additional
-  infrastructure or a client-side framework.
+- **Monorepo:** Rails, Go, schemas, fixtures, docs, and agent skills evolve in
+  the same repository.

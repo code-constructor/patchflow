@@ -3,10 +3,11 @@ import DOMPurify from "dompurify"
 
 export default class extends Controller {
   static targets = ["source", "output", "splitButton", "unifiedButton"]
-  static values = { highlights: Object }
+  static values = { highlights: Object, initial: String }
 
   connect() {
-    this.mode = localStorage.getItem("patchflow-diff-mode") || "side-by-side"
+    const configuredMode = this.initialValue === "unified" ? "line-by-line" : "side-by-side"
+    this.mode = localStorage.getItem("patchflow-diff-mode") || configuredMode
     this.render()
   }
 

@@ -78,9 +78,31 @@ module Patchflow
           "title" => category.fetch(:title),
           "priority" => category.fetch(:priority),
           "rationale" => category.fetch(:rationale),
-          "files" => matches.sort
+          "files" => matches.sort,
+          "blocks" => baseline_blocks(category, matches.sort)
         }
       end
+    end
+
+    private
+
+    def baseline_blocks(category, paths)
+      category_id = category.fetch(:id)
+      [
+        {
+          "id" => "#{category_id}-intro",
+          "type" => "prose",
+          "body" => category.fetch(:rationale)
+        },
+        *paths.each_with_index.map do |path, index|
+          {
+            "id" => "#{category_id}-diff-#{index + 1}",
+            "type" => "diff",
+            "path" => path,
+            "view" => "split"
+          }
+        end
+      ]
     end
   end
 end

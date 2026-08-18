@@ -20,7 +20,7 @@
   <div><dt>Artifact</dt><dd class="sha"><%= @artifact.id %></dd></div>
 </dl>
 
-<section class="section grid-two">
+<section class="section <%= @artifact.blocks? ? '' : 'grid-two' %>">
   <article class="card">
     <h2>Change explanation</h2>
     <div data-controller="review-document">
@@ -29,6 +29,7 @@
     </div>
   </article>
 
+  <% unless @artifact.blocks? %>
   <aside class="card">
     <h2>Overview annotations</h2>
     <div class="annotation-list">
@@ -45,6 +46,7 @@
       <div><%= form.submit "Save annotation", class: "button button--small" %></div>
     <% end %>
   </aside>
+  <% end %>
 </section>
 
 <section class="section">

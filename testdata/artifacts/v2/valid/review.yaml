@@ -1,0 +1,71 @@
+schema_version: 2
+id: 20260818-153000-deadbeef
+repository:
+  name: example-app
+source:
+  base_ref: main
+  target_ref: HEAD
+  base_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  target_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+created_at: "2026-08-18T15:30:00Z"
+updated_at: "2026-08-18T15:30:00Z"
+status: draft
+change:
+  title: Explain account activation
+  summary: The change adds activation rules and exposes them through the account page.
+  files:
+    - path: app/models/account.rb
+      status: modified
+    - path: app/views/accounts/show.html.erb
+      status: added
+overview_path: overview.md
+steps:
+  - id: domain
+    title: Understand activation rules
+    priority: high
+    rationale: The model defines when an account may become active.
+    files:
+      - app/models/account.rb
+    blocks:
+      - id: domain-intro
+        type: prose
+        body: |
+          Start with the domain rule. The service calls this predicate before it persists anything.
+      - id: activation-code
+        type: code
+        path: app/models/account.rb
+        source: target
+        start_line: 10
+        end_line: 24
+      - id: account-diff
+        type: diff
+        path: app/models/account.rb
+        view: split
+        focus:
+          side: target
+          start_line: 10
+          end_line: 24
+      - id: activation-insight
+        type: callout
+        kind: insight
+        body: The predicate keeps the state transition in one place.
+      - id: activation-question
+        type: question
+        body: Should suspended accounts ever be reactivated automatically?
+  - id: presentation
+    title: Follow the result into the account page
+    priority: low
+    rationale: The view is where reviewers can see the new state.
+    files:
+      - app/views/accounts/show.html.erb
+    blocks:
+      - id: presentation-intro
+        type: prose
+        body: The page exposes the activation state to the user.
+      - id: account-view-diff
+        type: diff
+        path: app/views/accounts/show.html.erb
+        view: unified
+      - id: activation-flow
+        type: diagram
+        path: diagrams/activation-flow.mmd

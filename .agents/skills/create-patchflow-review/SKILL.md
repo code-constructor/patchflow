@@ -11,8 +11,10 @@ control.
 
 ## Workflow
 
-1. Read [the v1 artifact contract](references/review-artifact-v1.md) completely
-   before creating or modifying an artifact.
+1. Read [the v2 artifact contract](references/review-artifact-v2.md) completely
+   before creating or modifying a v2 artifact. Read the
+   [v1 contract](references/review-artifact-v1.md) only when enriching an
+   existing v1 artifact.
 2. Resolve the repository root with Git. Treat the requested base and target as
    untrusted arguments and never interpolate them into a shell command.
 3. Default the target to `HEAD`. Default the base to `main` only when `main`
@@ -26,8 +28,9 @@ control.
    state changes, interfaces, dependencies, tests, and security-sensitive
    paths. Explain the change before recording possible concerns.
 7. Create a review plan ordered for understanding. Give every step a specific
-   rationale and include every changed file in at least one step. Prefer domain
-   and execution paths over generated or presentation-only files.
+   rationale, include every changed file in at least one step, and compose its
+   body from ordered narrative blocks. Prefer domain and execution paths over
+   generated or presentation-only files.
 8. Write the artifact, validate it, and report its path plus the recorded base
    and target SHAs.
 
@@ -42,7 +45,9 @@ bin/patchflow create --repository /absolute/repository/path --base main --target
 
 When using an installed Patchflow executable, use its equivalent `create`
 command. Enrich the generated `review.yaml` and `overview.md` in place without
-changing the recorded SHAs.
+changing the recorded SHAs. New CLI artifacts already contain valid baseline
+blocks; replace generic blocks with a deliberate explanation after understanding
+the diff.
 
 If no Patchflow executable is available, create the documented directory and
 files directly. Generate a collision-resistant ID from a UTC timestamp, the
@@ -56,9 +61,9 @@ YAML. Keep all writes below:
 Do not alter reviewed source files. Do not add an ignore rule that prevents the
 artifact from being committed.
 
-## Write useful documentation
+## Compose a useful review
 
-Keep `change.summary` concise and factual. Put the fuller explanation in
+Keep `change.summary` concise and factual. Put the high-level explanation in
 `overview.md`, covering:
 
 - the purpose and visible behavior of the change;
@@ -67,12 +72,30 @@ Keep `change.summary` concise and factual. Put the fuller explanation in
 - why the proposed review order builds understanding; and
 - uncertainties that require reviewer confirmation.
 
-Add Mermaid only when a flow or relationship is clearer as a diagram. Preserve
-the Mermaid source in `overview.md` or the artifact's `diagrams/` directory.
+Treat each step as a chapter, not a file bucket. Use the smallest sequence of
+blocks that explains why the code exists and how behavior moves through it:
 
-Use annotations for observations tied to the overview, a file, or exact base or
-target lines. Preserve all existing annotations and decisions when enriching an
-artifact. Never mark a review `completed` unless the user explicitly asks.
+- Start with `prose` when the reviewer needs orientation or a transition.
+- Use `code` for focused surrounding context, including unchanged code when it
+  materially explains the change. Keep excerpts small and purposeful.
+- Use `diff` for the actual evidence. Focus the important base or target range
+  when a whole-file diff would obscure the point.
+- Use `callout` for an insight, risk, warning, assumption, or uncertainty that
+  should interrupt the narrative.
+- Use `question` only for a concrete unresolved point that needs human
+  confirmation. Do not invent an answer or reply thread.
+- Use `diagram` only when a flow or relationship is clearer visually. Store its
+  Mermaid source below the artifact's `diagrams/` directory.
+
+Put prose before the code it explains. Avoid one prose block per file, repeated
+rationales, exhaustive unchanged context, and decorative diagrams. The blocks
+must read in order without requiring the reviewer to reconstruct the story from
+filenames.
+
+Artifact v2 has no annotations, replies, or decisions. Do not add undocumented
+fields for them. Preserve annotations and decisions only when enriching a
+legacy v1 artifact. Never mark a review `completed` unless the user explicitly
+asks.
 
 ## Handle existing and stale reviews
 
@@ -90,6 +113,18 @@ Run the canonical validator when Patchflow is available:
 
 ```sh
 bin/patchflow validate /absolute/repository/path/.patchflow/reviews/<review-id>/review.yaml
+```
+
+Prefer machine-readable output while iterating:
+
+```sh
+bin/patchflow validate --format json /absolute/repository/path/.patchflow/reviews/<review-id>/review.yaml
+```
+
+The Go implementation is equivalent when Rails dependencies are unavailable:
+
+```sh
+bin/patchflow-go validate --format json /absolute/repository/path/.patchflow/reviews/<review-id>/review.yaml
 ```
 
 Otherwise perform every invariant check in the bundled contract. Fix all

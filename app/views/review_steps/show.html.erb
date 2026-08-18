@@ -10,6 +10,93 @@
   <span class="priority priority--<%= @step.fetch('priority') %>"><%= @step.fetch("priority") %> priority</span>
 </section>
 
+<% if @artifact.blocks? %>
+  <main class="review-chapter section">
+    <% @step.fetch("blocks").each do |block| %>
+      <% case block.fetch("type") %>
+      <% when "prose" %>
+        <section class="review-block review-block--prose" id="<%= block.fetch('id') %>" data-controller="review-document">
+          <pre class="markdown-source" data-review-document-target="source"><%= block.fetch("body") %></pre>
+          <div class="markdown" data-review-document-target="output"></div>
+        </section>
+      <% when "callout" %>
+        <aside class="review-block callout callout--<%= block.fetch('kind') %>" id="<%= block.fetch('id') %>">
+          <div class="eyebrow"><%= block.fetch("kind") %></div>
+          <div data-controller="review-document">
+            <pre class="markdown-source" data-review-document-target="source"><%= block.fetch("body") %></pre>
+            <div class="markdown" data-review-document-target="output"></div>
+          </div>
+        </aside>
+      <% when "question" %>
+        <aside class="review-block review-question" id="<%= block.fetch('id') %>">
+          <div class="eyebrow">Open question</div>
+          <div data-controller="review-document">
+            <pre class="markdown-source" data-review-document-target="source"><%= block.fetch("body") %></pre>
+            <div class="markdown" data-review-document-target="output"></div>
+          </div>
+        </aside>
+      <% when "diff" %>
+        <% path = block.fetch("path") %>
+        <% diff = @diffs[path] %>
+        <section class="review-block card code-card" id="<%= block.fetch('id') %>">
+          <header class="code-card__header">
+            <div><div class="eyebrow">Changed file</div><h3><%= path %></h3></div>
+            <% if block["focus"] %>
+              <span class="focus-label"><%= block.dig("focus", "side") %> lines <%= block.dig("focus", "start_line") %><%= "–#{block.dig('focus', 'end_line')}" if block.dig("focus", "end_line") %></span>
+            <% end %>
+          </header>
+          <% if @diff_errors[path] %>
+            <div class="diff-notice">
+              <strong>Diff not displayed</strong>
+              <p><%= @diff_errors.fetch(path) %>. Review this generated or unusually large file directly in the repository.</p>
+            </div>
+          <% else %>
+            <div class="diff-viewer"
+                 data-controller="diff-viewer"
+                 data-diff-viewer-initial-value="<%= block.fetch('view', 'split') %>"
+                 data-diff-viewer-highlights-value="<%= @diff_highlights.fetch(path).to_json %>">
+              <div class="diff-toolbar" aria-label="Diff layout">
+                <button type="button" class="diff-mode-button" data-diff-viewer-target="splitButton" data-action="diff-viewer#showSplit">Split</button>
+                <button type="button" class="diff-mode-button" data-diff-viewer-target="unifiedButton" data-action="diff-viewer#showUnified">Unified</button>
+              </div>
+              <pre hidden data-diff-viewer-target="source"><%= diff %></pre>
+              <div class="diff-render" data-diff-viewer-target="output"></div>
+              <noscript><pre class="diff"><%= diff.presence || "No textual diff available for this path." %></pre></noscript>
+            </div>
+          <% end %>
+        </section>
+      <% when "code" %>
+        <section class="review-block card code-card" id="<%= block.fetch('id') %>">
+          <header class="code-card__header">
+            <div><div class="eyebrow"><%= block.fetch("source") %> source</div><h3><%= block.fetch("path") %></h3></div>
+            <span class="focus-label">lines <%= block.fetch("start_line") %>–<%= block.fetch("end_line") %></span>
+          </header>
+          <% if @block_errors[block.fetch("id")] %>
+            <div class="diff-notice"><%= @block_errors.fetch(block.fetch("id")) %></div>
+          <% else %>
+            <div class="code-excerpt">
+              <% @code_excerpts.fetch(block.fetch("id")).each do |line| %>
+                <div class="code-excerpt__line"><span class="code-excerpt__number"><%= line.fetch("number") %></span><code><%= line.fetch("html").html_safe %></code></div>
+              <% end %>
+            </div>
+          <% end %>
+        </section>
+      <% when "diagram" %>
+        <section class="review-block card" id="<%= block.fetch('id') %>">
+          <div class="eyebrow">Diagram</div>
+          <% if @block_errors[block.fetch("id")] %>
+            <div class="diff-notice"><%= @block_errors.fetch(block.fetch("id")) %></div>
+          <% else %>
+            <div data-controller="review-document">
+              <pre class="markdown-source" data-review-document-target="source"><%= "```mermaid\n#{@diagram_sources.fetch(block.fetch('id'))}\n```" %></pre>
+              <div class="markdown" data-review-document-target="output"></div>
+            </div>
+          <% end %>
+        </section>
+      <% end %>
+    <% end %>
+  </main>
+<% else %>
 <% @step.fetch("files").each do |path| %>
   <% diff = @diffs[path] %>
   <section class="section card">
@@ -72,6 +159,7 @@
       <div><%= form.submit "Save annotation", class: "button button--small" %></div>
     <% end %>
   </section>
+<% end %>
 <% end %>
 
 <nav class="step-nav">

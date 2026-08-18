@@ -72,6 +72,17 @@ module Patchflow
       output
     end
 
+    def file_excerpt(sha, path, start_line:, end_line:)
+      validate_sha!(sha)
+      validate_path!(path)
+      unless start_line.is_a?(Integer) && end_line.is_a?(Integer) && start_line.positive? && end_line >= start_line && (end_line - start_line) < 500
+        raise InvalidGitPath, "Code excerpts must contain between 1 and 500 ordered lines"
+      end
+
+      source = git("show", "#{sha}:#{path}")
+      source.lines.drop(start_line - 1).first(end_line - start_line + 1).join
+    end
+
     def target_changed?(ref, recorded_sha)
       resolve_commit(ref) != recorded_sha
     end

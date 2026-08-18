@@ -59,6 +59,24 @@ module Patchflow
       File.read(real_path)
     end
 
+    def read_asset(artifact, relative_path)
+      directory = safe_review_directory(artifact.id, create: false)
+      candidate = directory.join(relative_path).cleanpath
+      prefix = "#{directory}/"
+      unless candidate.to_s.start_with?(prefix) && candidate.file?
+        raise ReviewNotFound, "Review asset does not exist"
+      end
+
+      real_path = Pathname(File.realpath(candidate))
+      unless real_path.to_s.start_with?(prefix) && real_path.file?
+        raise UnsafeReviewPath, "Review asset escapes its artifact directory"
+      end
+
+      File.read(real_path)
+    rescue Errno::ENOENT
+      raise ReviewNotFound, "Review asset does not exist"
+    end
+
     private
 
     def reviews_root

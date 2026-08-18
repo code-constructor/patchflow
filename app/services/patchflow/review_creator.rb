@@ -35,7 +35,7 @@ module Patchflow
       step_count = steps.length
 
       {
-        "schema_version" => 1,
+        "schema_version" => 2,
         "id" => review_id,
         "repository" => { "name" => repository.name },
         "source" => {
@@ -53,9 +53,7 @@ module Patchflow
           "files" => changed_files
         },
         "overview_path" => "overview.md",
-        "steps" => steps,
-        "annotations" => [],
-        "decisions" => []
+        "steps" => steps
       }
     end
 

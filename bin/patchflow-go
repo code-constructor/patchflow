@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export GOFLAGS="${GOFLAGS:+${GOFLAGS} }-mod=mod"
+exec go run ./cmd/patchflow "$@"

@@ -1,3 +1,4 @@
+require "json_schemer"
 require "pathname"
 require "time"
 require "yaml"
@@ -12,6 +13,7 @@ module Patchflow
     SCOPES = %w[overview file line].freeze
     SIDES = %w[base target].freeze
     DECISION_STATUSES = %w[open accepted rejected].freeze
+    V2_SCHEMA_PATH = Pathname(__dir__).join("../../../schema/patchflow-review-v2.schema.json").expand_path.freeze
 
     attr_reader :data, :path
 
@@ -60,11 +62,11 @@ module Patchflow
     end
 
     def annotations
-      data["annotations"]
+      data["annotations"] || []
     end
 
     def decisions
-      data["decisions"]
+      data["decisions"] || []
     end
 
     def status
@@ -75,6 +77,14 @@ module Patchflow
       path&.dirname&.join(data["overview_path"])
     end
 
+    def schema_version
+      data["schema_version"]
+    end
+
+    def blocks?
+      schema_version == 2
+    end
+
     private
 
     def validate_document
@@ -83,6 +93,14 @@ module Patchflow
         return
       end
 
+      if data["schema_version"] == 2
+        validate_v2_document
+      else
+        validate_v1_document
+      end
+    end
+
+    def validate_v1_document
       require_keys(data, %w[schema_version id repository source created_at updated_at status change overview_path steps annotations decisions], "document")
       allow_only_keys(data, %w[schema_version id repository source created_at updated_at status change overview_path steps annotations decisions], "document")
 
@@ -98,6 +116,80 @@ module Patchflow
       validate_steps(data["steps"])
       validate_annotations(data["annotations"])
       validate_decisions(data["decisions"])
+    end
+
+    def validate_v2_document
+      schema_errors = self.class.v2_schema.validate(data).to_a
+      schema_errors.each do |schema_error|
+        location = schema_error.fetch("data_pointer").presence || "/"
+        error("#{location}: #{schema_error.fetch('error')}")
+      end
+      return if schema_errors.any?
+
+      validate_v2_semantics
+    end
+
+    def validate_v2_semantics
+      changed_files = data.dig("change", "files")
+      changed_paths = changed_files.map { |file| file.fetch("path") }
+      changed_files.each_with_index do |file, index|
+        validate_artifact_path(file.fetch("path"), "change.files[#{index}].path")
+        validate_artifact_path(file.fetch("previous_path"), "change.files[#{index}].previous_path") if file.key?("previous_path")
+      end
+      error("change.files paths must be unique") unless changed_paths.uniq.length == changed_paths.length
+
+      step_ids = []
+      block_ids = []
+      planned_paths = []
+      data.fetch("steps").each_with_index do |step, step_index|
+        step_label = "steps[#{step_index}]"
+        step_ids << step.fetch("id")
+
+        step.fetch("files").each_with_index do |file_path, file_index|
+          validate_artifact_path(file_path, "#{step_label}.files[#{file_index}]")
+          error("#{step_label}.files references unchanged path #{file_path}") unless changed_paths.include?(file_path)
+          planned_paths << file_path
+        end
+
+        step.fetch("blocks").each_with_index do |block, block_index|
+          block_label = "#{step_label}.blocks[#{block_index}]"
+          block_ids << block.fetch("id")
+          validate_v2_block(block, block_label, changed_paths)
+        end
+      end
+
+      error("step IDs must be unique") unless step_ids.uniq.length == step_ids.length
+      error("block IDs must be unique across the review") unless block_ids.uniq.length == block_ids.length
+      missing_paths = changed_paths - planned_paths
+      error("every changed file must appear in a review step; missing: #{missing_paths.join(', ')}") if missing_paths.any?
+    end
+
+    def validate_v2_block(block, label, changed_paths)
+      case block.fetch("type")
+      when "diff"
+        validate_artifact_path(block.fetch("path"), "#{label}.path")
+        error("#{label}.path references unchanged path #{block['path']}") unless changed_paths.include?(block["path"])
+        validate_line_range(block["focus"], label) if block["focus"]
+      when "code"
+        validate_artifact_path(block.fetch("path"), "#{label}.path")
+        error("#{label}.end_line cannot be before start_line") if block.fetch("end_line") < block.fetch("start_line")
+        error("#{label} may contain at most 500 lines") if block.fetch("end_line") - block.fetch("start_line") >= 500
+      when "diagram"
+        validate_artifact_path(block.fetch("path"), "#{label}.path")
+        error("#{label}.path must be inside diagrams/") unless block.fetch("path").start_with?("diagrams/")
+      end
+    end
+
+    def validate_line_range(range, label)
+      return unless range["end_line"]
+
+      error("#{label}.focus.end_line cannot be before start_line") if range.fetch("end_line") < range.fetch("start_line")
+    end
+
+    class << self
+      def v2_schema
+        @v2_schema ||= JSONSchemer.schema(V2_SCHEMA_PATH)
+      end
     end
 
     def validate_repository(repository)

@@ -18,6 +18,8 @@ gem "stimulus-rails"
 gem "jbuilder"
 # Apply language-aware syntax highlighting to code diffs
 gem "rouge", "~> 5.1"
+# Validate Patchflow artifacts against the shared JSON Schema contract
+gem "json_schemer", "~> 2.5"
 
 # Use Active Model has_secure_password [https://guides.rubyonrails.org/active_model_basics.html#securepassword]
 # gem "bcrypt", "~> 3.1.7"

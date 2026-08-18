@@ -15,10 +15,13 @@ class ReviewCreatorTest < ActiveSupport::TestCase
         clock: clock
       ).create
 
+      assert_equal 2, artifact.schema_version
       assert_equal repository.resolve_commit("main"), artifact.source.fetch("base_sha")
       assert_equal repository.resolve_commit("HEAD"), artifact.source.fetch("target_sha")
       assert_equal 3, artifact.change.fetch("files").length
       assert_equal artifact.change.fetch("files").pluck("path").sort, artifact.steps.flat_map { |step| step.fetch("files") }.uniq.sort
+      assert artifact.steps.all? { |step| step.fetch("blocks").first.fetch("type") == "prose" }
+      assert_equal artifact.change.fetch("files").pluck("path").sort, artifact.steps.flat_map { |step| step.fetch("blocks") }.select { |block| block.fetch("type") == "diff" }.pluck("path").sort
       assert File.exist?(File.join(directory, ".patchflow/reviews", artifact.id, "review.yaml"))
       assert_includes File.read(File.join(directory, ".patchflow/reviews", artifact.id, "overview.md")), "baseline plan"
     end

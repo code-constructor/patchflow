@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{.Title}} · Patchflow</title>
+  <style>
+    :root{color:#17211b;background:#f5f6f1;font:16px/1.65 Inter,ui-sans-serif,system-ui,sans-serif}*{box-sizing:border-box}body{margin:0}.shell{width:min(100% - 32px,980px);margin:54px auto 90px}.brand{color:#176b4a;font-size:13px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}.hero{padding:30px 0 42px;border-bottom:1px solid #dce1da}h1{margin:8px 0 12px;font-size:clamp(38px,7vw,68px);line-height:1.03;letter-spacing:-.04em}h2{margin:0;font-size:30px;letter-spacing:-.025em}h3{margin:0;font-size:16px}.muted{color:#667269}.meta{display:flex;gap:18px;flex-wrap:wrap;font:12px ui-monospace,monospace}.chapter{padding:54px 0;border-bottom:1px solid #dce1da}.chapter-head{display:grid;grid-template-columns:52px 1fr auto;gap:18px;align-items:start;margin-bottom:38px}.number{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;color:#176b4a;background:#e0f1e8;font-weight:800}.priority{color:#8a4b09;font-size:11px;font-weight:800;text-transform:uppercase}.block+.block{margin-top:30px}.prose{width:min(760px,100%);margin-inline:auto;font-size:18px}.prose code,.message code{padding:2px 5px;border-radius:4px;background:#e9ede8}.message{width:min(820px,100%);margin-inline:auto;padding:18px 20px;border-left:4px solid #176b4a;border-radius:10px;background:#e0f1e8}.message.question{border-color:#45607e;background:#eef4fa}.message.risk,.message.warning,.message.uncertainty{border-color:#8a4b09;background:#fff0d5}.label{margin-bottom:6px;color:#667269;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.code{overflow:hidden;border:1px solid #dce1da;border-radius:14px;background:white;box-shadow:0 8px 30px rgba(27,43,33,.04)}.code-head{display:flex;justify-content:space-between;gap:16px;padding:14px 18px;border-bottom:1px solid #dce1da}.code pre{max-height:680px;margin:0;padding:18px;overflow:auto;color:#dbe8df;background:#111813;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:2}.error{margin:16px;padding:14px;border-radius:8px;color:#8a4b09;background:#fff0d5}@media(max-width:650px){.shell{margin-top:24px}.chapter-head{grid-template-columns:44px 1fr}.priority{grid-column:2}.code-head{display:block}}
+  </style>
+</head>
+<body><main class="shell">
+  <header class="hero"><div class="brand">Patchflow · Go reader</div><h1>{{.Title}}</h1><p class="muted">{{.Summary}}</p><div class="meta"><span>BASE {{.Base}}</span><span>TARGET {{.Target}}</span></div></header>
+  {{range .Steps}}<article class="chapter"><header class="chapter-head"><span class="number">{{.Number}}</span><div><h2>{{.Title}}</h2><p class="muted">{{.Rationale}}</p></div><span class="priority">{{.Priority}}</span></header>
+    {{range .Blocks}}
+      {{if eq .Type "prose"}}<section id="{{.ID}}" class="block prose">{{.HTML}}</section>{{end}}
+      {{if eq .Type "callout"}}<aside id="{{.ID}}" class="block message {{.Kind}}"><div class="label">{{.Kind}}</div>{{.HTML}}</aside>{{end}}
+      {{if eq .Type "question"}}<aside id="{{.ID}}" class="block message question"><div class="label">Open question</div>{{.HTML}}</aside>{{end}}
+      {{if or (eq .Type "diff") (eq .Type "code") (eq .Type "diagram")}}<section id="{{.ID}}" class="block code"><header class="code-head"><h3>{{.Path}}</h3><span class="label">{{.Label}}</span></header>{{if .Error}}<div class="error">{{.Error}}</div>{{else}}<pre>{{.Source}}</pre>{{end}}</section>{{end}}
+    {{end}}
+  </article>{{end}}
+</main></body></html>
