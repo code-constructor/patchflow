@@ -114,6 +114,35 @@ bin/dev
 
 The development server is available at <http://localhost:3000> by default.
 
+### Docker and the local development proxy
+
+Docker is an optional development path. When the shared `dev-proxy` Traefik
+network is available, start Patchflow with:
+
+```sh
+dev-proxy up
+docker compose up --build
+```
+
+Patchflow is then available at <http://patchflow.localhost>. No host port is
+claimed by the application container; Traefik discovers it from Compose labels.
+
+The project itself is mounted at `/app`. The host's `$HOME/Projects` directory
+is mounted at `/workspace`, allowing Patchflow to review other local projects.
+For example, host project `$HOME/Projects/example` is selected in the UI as
+`/workspace/example`.
+
+The image runs as UID and GID `1000` by default so review artifacts remain owned
+by the developer. Override these values on systems with different IDs:
+
+```sh
+PATCHFLOW_UID="$(id -u)" PATCHFLOW_GID="$(id -g)" docker compose up --build
+```
+
+Use `DEV_DOMAIN` to select another `*.localhost` hostname. This Docker workflow
+is a convenience for development; Patchflow itself still requires only Ruby,
+Git, and SQLite.
+
 ## Try the review workflow
 
 Open Patchflow, select a local Git repository, and create a review from a base

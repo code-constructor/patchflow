@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1
+
+ARG RUBY_VERSION=3.4.10
+FROM ruby:${RUBY_VERSION}-slim
+
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+
+ENV BUNDLE_PATH=/usr/local/bundle \
+    BUNDLE_JOBS=4 \
+    BUNDLE_RETRY=3
+
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y \
+      build-essential \
+      curl \
+      git \
+      libopenslide0 \
+      libsqlite3-dev \
+      libvips \
+      libyaml-dev \
+      pkg-config \
+      sqlite3 && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --gid "${GROUP_ID}" patchflow && \
+    useradd --uid "${USER_ID}" --gid "${GROUP_ID}" --create-home patchflow
+
+WORKDIR /app
+
+COPY Gemfile Gemfile.lock ./
+RUN gem install bundler -v 4.0.18 && bundle install
+
+COPY --chown=patchflow:patchflow . .
+
+USER patchflow
+
+EXPOSE 3000
+
+CMD ["bin/rails", "server", "--binding", "0.0.0.0", "--port", "3000"]

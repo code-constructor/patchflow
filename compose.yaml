@@ -1,0 +1,38 @@
+name: ${COMPOSE_PROJECT_NAME:-patchflow}
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      args:
+        USER_ID: ${PATCHFLOW_UID:-1000}
+        GROUP_ID: ${PATCHFLOW_GID:-1000}
+    image: patchflow:dev
+    init: true
+    restart: unless-stopped
+    command: >-
+      sh -c "bin/rails db:prepare &&
+      exec bin/rails server --binding 0.0.0.0 --port 3000"
+    environment:
+      RAILS_ENV: development
+    volumes:
+      - .:/app
+      - ${HOME}/Projects:/workspace
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:3000/up > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-patchflow}.rule=Host(`${DEV_DOMAIN:-patchflow.localhost}`)"
+      - "traefik.http.services.${COMPOSE_PROJECT_NAME:-patchflow}.loadbalancer.server.port=3000"
+    networks:
+      - default
+      - dev-proxy
+
+networks:
+  dev-proxy:
+    external: true
