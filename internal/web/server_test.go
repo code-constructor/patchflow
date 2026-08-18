@@ -47,6 +47,14 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 			t.Errorf("chapter missing %q", expected)
 		}
 	}
+	for _, expected := range []string{"aria-label=\"Comment on block domain-intro\"", "title=\"Add comment\"", "popover=\"auto\""} {
+		if !strings.Contains(chapter.Body.String(), expected) {
+			t.Errorf("chapter comment action missing %q", expected)
+		}
+	}
+	if strings.Contains(chapter.Body.String(), "class=\"discussion-panel\"") {
+		t.Error("empty discussion panels must not interrupt the reading flow")
+	}
 	if strings.Contains(chapter.Body.String(), "href=\""+reviewPath+"/blocks/domain-intro\"") {
 		t.Error("block copy control must not navigate")
 	}
@@ -73,7 +81,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		t.Fatalf("chapter navigation does not scroll in place: %d", chapterController.Code)
 	}
 	commentController := perform(app, http.MethodGet, "/assets/controllers/comment_thread_controller.js", "")
-	if commentController.Code != http.StatusOK || !strings.Contains(commentController.Body.String(), "event.shiftKey") || !strings.Contains(commentController.Body.String(), "enhanceDiff") {
+	if commentController.Code != http.StatusOK || !strings.Contains(commentController.Body.String(), "pointermove") || !strings.Contains(commentController.Body.String(), "showPopover") || !strings.Contains(commentController.Body.String(), "enhanceDiff") {
 		t.Fatalf("comment thread controller unavailable: %d", commentController.Code)
 	}
 	diagramController := perform(app, http.MethodGet, "/assets/controllers/diagram_viewer_controller.js", "")

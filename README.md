@@ -87,6 +87,12 @@ Threads and individual comments use the same addressability contract:
 `/reviews/<review-id>/comments/<comment-id>`. Copy controls do not navigate;
 the paths can be passed back to `patchflow show` or an agent.
 
+Comment authoring stays out of the reading flow until it is needed. Use the
+speech-bubble action on a block for a block-wide thread. In code and diff
+blocks, press a line's `+`, drag to the last relevant line, and release to open
+the contextual composer for that immutable source range. Press and release on
+one line to target only that line.
+
 Generated `.patchflow` artifacts are excluded from the diff under review by
 default, preventing Patchflow from reviewing its own output.
 

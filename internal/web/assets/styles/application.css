@@ -348,6 +348,7 @@ textarea { min-height: 92px; resize: vertical; }
 .review-block--prose { width: 100%; font-size: 17px; }
 .review-block--prose > [data-controller="review-document"] { max-width: var(--prose-width); }
 .block-reference-row { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+.block-actions { display: flex; align-items: center; gap: 3px; }
 .block-heading { justify-content: space-between; }
 .block-copy { width: 30px; height: 30px; display: grid; place-items: center; flex: none; padding: 0; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--color-muted); background: transparent; cursor: pointer; transition: color var(--motion-fast), background var(--motion-fast), border-color var(--motion-fast); }
 .block-copy:hover, .block-copy:focus-visible { border-color: var(--color-border); color: var(--color-accent-strong); background: var(--color-surface-muted); }
@@ -377,6 +378,7 @@ textarea { min-height: 92px; resize: vertical; }
 .line-comment-button { width: 20px; height: 20px; display: grid; place-items: center; align-self: center; justify-self: center; padding: 0; border: 0; border-radius: var(--radius-xs); color: var(--color-on-accent); background: var(--color-comment-marker); font: 700 15px/1 var(--font-mono); cursor: pointer; opacity: 0; transition: opacity var(--motion-fast), transform var(--motion-fast); }
 .code-excerpt__line:hover .line-comment-button, .line-comment-button:focus-visible, [data-comment-line].has-comment-thread .line-comment-button { opacity: 1; }
 .line-comment-button:hover { transform: scale(1.08); }
+.is-line-selecting, .is-line-selecting * { cursor: row-resize !important; user-select: none !important; }
 .d2h-code-linenumber, .d2h-code-side-linenumber { position: relative; }
 .d2h-code-linenumber .line-comment-button, .d2h-code-side-linenumber .line-comment-button { position: absolute; z-index: 2; left: 2px; top: 50%; transform: translateY(-50%); }
 .d2h-code-linenumber:hover .line-comment-button, .d2h-code-side-linenumber:hover .line-comment-button { opacity: 1; }
@@ -404,9 +406,15 @@ textarea { min-height: 92px; resize: vertical; }
 .author-kind { padding: 2px 6px; border-radius: var(--radius-pill); color: var(--color-muted); background: var(--color-slate-100); font: 700 9px var(--font-mono); text-transform: uppercase; }
 .author-kind--agent { color: var(--color-accent-strong); background: var(--color-accent-soft); }
 .comment-composer, .reply-composer { border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.comment-composer { position: fixed; inset: auto; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: 0; padding: 0; overflow: auto; color: var(--color-text); box-shadow: var(--shadow-overlay); }
+.comment-composer::backdrop { background: transparent; }
 .reply-composer { margin: 0 14px 14px; }
-.comment-composer > summary, .reply-composer > summary { padding: 10px 12px; color: var(--color-accent-strong); font: 700 12px var(--font-mono); cursor: pointer; }
-.comment-composer[open] > summary, .reply-composer[open] > summary { border-bottom: 1px solid var(--color-border); }
+.reply-composer > summary { padding: 10px 12px; color: var(--color-accent-strong); font: 700 12px var(--font-mono); cursor: pointer; }
+.reply-composer[open] > summary { border-bottom: 1px solid var(--color-border); }
+.comment-composer__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--color-border); }
+.comment-composer__header > div { display: grid; gap: 2px; }
+.comment-composer__header strong { color: var(--color-heading); font: 650 12px var(--font-mono); }
+.comment-composer__close { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-sm); color: var(--color-muted); background: var(--color-slate-100); font-size: 20px; line-height: 1; cursor: pointer; }
 .comment-form { display: grid; gap: 12px; padding: 14px; }
 .comment-form textarea { min-height: 82px; }
 .comment-form .button { justify-self: start; }

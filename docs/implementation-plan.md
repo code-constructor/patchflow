@@ -119,10 +119,11 @@ all references against the immutable review source, write updates atomically,
 and preserve author, creation time, resolution state, and reply order.
 
 Store the mutable discussion in a separately versioned `comments.yaml` so the
-review narrative remains stable. The browser offers whole-block comments,
-Shift-selectable source ranges in code and diff blocks, replies, resolution,
-line markers, and copyable thread/comment paths. The CLI offers the same list,
-show, create, reply, resolve, and reopen lifecycle for humans and agents.
+review narrative remains stable. The browser offers icon-triggered whole-block
+comments, pointer-drag source ranges with a contextual overlay in code and diff
+blocks, replies, resolution, line markers, and copyable thread/comment paths.
+The CLI offers the same list, show, create, reply, resolve, and reopen lifecycle
+for humans and agents.
 
 ### 12. Classic source review — planned
 
