@@ -11,15 +11,18 @@ under `testdata/artifacts/v2`.
 ```text
 .patchflow/reviews/<review-id>/
   review.yaml
+  comments.yaml
   overview.md
   diagrams/
   assets/
 ```
 
-`review.yaml` is the source of truth. `overview.md` introduces the change;
+`review.yaml` is the source of truth for the review narrative. `overview.md` introduces the change;
 ordered blocks in `steps[].blocks` tell its detailed review story. A v2 artifact
-does not contain annotations or decisions. The v1 reader remains available for
-existing artifacts while interaction design is deferred.
+does not contain annotations, replies, or decisions. Interactive discussion is
+stored in the separately versioned, optional `comments.yaml` contract described
+in [comments artifact v1](comments-artifact-v1.md). The v1 review reader remains
+available for existing artifacts.
 
 ## Chapter structure
 
@@ -45,8 +48,8 @@ The supported blocks are:
   they provide important context.
 - `callout`: Markdown `body` with `kind: insight | risk | warning | assumption |
   uncertainty`.
-- `question`: a static unresolved question in `body`. Replies are not part of
-  v2.
+- `question`: a static unresolved question in `body`. Discussion replies live
+  in `comments.yaml`, not inside the narrative block.
 - `diagram`: a Mermaid source `path` below the artifact's `diagrams/` directory.
 - `takeaway`: Markdown `body` that closes the chapter with its intended mental
   model. Place it last unless later evidence deliberately follows it.

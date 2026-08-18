@@ -1,6 +1,6 @@
 ---
 name: create-patchflow-review
-description: Create or enrich repository-local Patchflow code-review artifacts from committed local Git diffs. Use when asked to generate a Patchflow review, ordered review plan, change overview, review documentation, or Mermaid review diagram under `.patchflow/reviews`, and when updating or validating an existing Patchflow artifact against base and target commits.
+description: Create or enrich repository-local Patchflow code-review artifacts from committed local Git diffs, and inspect or answer persisted Patchflow review comments. Use when asked to generate a Patchflow review, ordered review plan, change overview, review documentation, Mermaid review diagram, or a response to a Patchflow thread or comment under `.patchflow/reviews`.
 ---
 
 # Create Patchflow Review
@@ -18,6 +18,8 @@ control.
    When working in the Patchflow repository, also read
    [`docs/review-composition.md`](../../../docs/review-composition.md) completely
    and apply its overview, chapter-order, block-grammar, and stable-ID rules.
+   When inspecting, creating, answering, or resolving discussion, also read
+   [the comments v1 contract](references/comments-artifact-v1.md) completely.
 2. Resolve the repository root with Git. Treat the requested base and target as
    untrusted arguments and never interpolate them into a shell command.
 3. Default the target to `HEAD`. Default the base to `main` only when `main`
@@ -117,9 +119,34 @@ Never collapse a design decision, security boundary, failure path, or unresolved
 question merely to shorten the page.
 
 Artifact v2 has no annotations, replies, or decisions. Do not add undocumented
-fields for them. Preserve annotations and decisions only when enriching a
-legacy v1 artifact. Never mark a review `completed` unless the user explicitly
-asks.
+fields for them to `review.yaml`; discussion belongs in `comments.yaml`.
+Preserve annotations and decisions only when enriching a legacy v1 artifact.
+Never mark a review `completed` unless the user explicitly asks.
+
+## Participate in discussion
+
+Never edit `comments.yaml` by hand when the Patchflow CLI is available. Resolve
+a copied reference and read its persisted anchor and context first:
+
+```sh
+bin/patchflow show --repository /absolute/repository/path \
+  /reviews/<review-id>/comments/<comment-id>
+```
+
+Answer through the containing thread so Patchflow generates the ID, timestamp,
+authorship, and `reply_to` relationship atomically:
+
+```sh
+bin/patchflow reply --repository /absolute/repository/path \
+  --author "Patchflow Agent" --author-kind agent \
+  --body "<concise evidence-backed answer>" \
+  /reviews/<review-id>/threads/<thread-id>
+```
+
+Use `patchflow comments` to list the full conversation. Resolve a thread only
+when the user requests it or the discussion clearly records an accepted
+outcome; use `patchflow resolve --reopen` when new evidence reopens the issue.
+Preserve human text and existing IDs exactly.
 
 ## Handle existing and stale reviews
 

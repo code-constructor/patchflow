@@ -39,7 +39,8 @@ critiqued.
    question, diagram, and takeaway blocks.
 5. Link directly to a stable block ID and carry syntax-highlighted split or
    unified diff state in the URL.
-6. Preserve the resulting documentation as a repository-local review artifact.
+6. Discuss a whole block or selected source lines with humans and Coding Agents.
+7. Preserve the resulting documentation and discussion as repository-local artifacts.
 
 The commit SHAs are part of the evidence. If the target changes, the existing
 artifact is stale and must be revised or regenerated rather than silently
@@ -52,6 +53,7 @@ The repository-local convention is:
 ```text
 .patchflow/reviews/<review-id>/
   review.yaml
+  comments.yaml
   overview.md
   diagrams/
   assets/
@@ -61,8 +63,9 @@ The repository-local convention is:
 schema version, immutable source refs, change summary, ordered review steps,
 priority rationales, narrative blocks, and review status. Markdown and Mermaid
 source remain part of the artifact instead of existing only as rendered UI
-state. Artifact v2 deliberately leaves interactive comments out while the
-chapter language is established; v1 artifacts remain readable.
+state. `comments.yaml` is a separately versioned source of truth for block and
+immutable source-range threads, including human and agent replies. It is created
+lazily when the first comment is saved. V1 review artifacts remain readable.
 
 Every v2 block has a review-wide unique semantic ID. Its copy control places a
 stable `/reviews/<review-id>/blocks/<block-id>` path on the clipboard without
@@ -79,6 +82,11 @@ bin/patchflow show \
   /reviews/<review-id>/blocks/<block-id>
 ```
 
+Threads and individual comments use the same addressability contract:
+`/reviews/<review-id>/threads/<thread-id>` and
+`/reviews/<review-id>/comments/<comment-id>`. Copy controls do not navigate;
+the paths can be passed back to `patchflow show` or an agent.
+
 Generated `.patchflow` artifacts are excluded from the diff under review by
 default, preventing Patchflow from reviewing its own output.
 
@@ -94,6 +102,7 @@ The initial vertical slice focuses on:
 - displaying syntax-highlighted split and unified diffs in the planned order;
 - collapsing generated or mechanical evidence without removing it from scope;
 - rendering Markdown and Mermaid diagrams.
+- persisting addressable block and code-range discussions with replies.
 
 Large-diff virtualization, GitHub pull-request import, specialized notebook or
 image viewers, and extensive keyboard navigation are deliberately deferred
@@ -187,6 +196,31 @@ bin/patchflow validate \
   /absolute/path/to/repository/.patchflow/reviews/<review-id>/review.yaml
 ```
 
+The standalone discussion contract is validated the same way:
+
+```sh
+bin/patchflow validate \
+  /absolute/path/to/repository/.patchflow/reviews/<review-id>/comments.yaml
+```
+
+List and inspect discussions, then answer one as a human or Coding Agent:
+
+```sh
+bin/patchflow comments --repository /absolute/path/to/repository \
+  /reviews/<review-id>
+
+bin/patchflow show --repository /absolute/path/to/repository \
+  /reviews/<review-id>/comments/<comment-id>
+
+bin/patchflow reply --repository /absolute/path/to/repository \
+  --author "Patchflow Agent" --author-kind agent \
+  --body "The service owns this boundary because …" \
+  /reviews/<review-id>/threads/<thread-id>
+```
+
+See the [comments artifact contract](docs/comments-artifact-v1.md) for block
+and code-range creation, replies, stable references, and resolution commands.
+
 Start the complete local application, optionally with a repository already
 selected:
 
@@ -201,7 +235,8 @@ JavaScript modules, schema, and vendored browser libraries.
 The repository also contains the Coding Agent skill
 `create-patchflow-review` under `.agents/skills/`. It can analyze the committed
 diff and enrich the baseline summary, review order, rationales, and Mermaid
-documentation while preserving the recorded source SHAs.
+documentation while preserving the recorded source SHAs. It can also inspect
+and answer persisted review comments through the CLI without browser automation.
 
 ## Verification
 

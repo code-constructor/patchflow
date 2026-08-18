@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	patchreview "github.com/traqx-ai/patchflow/internal/review"
 )
 
 // TestAppRunsRepositoryToChapterFlow exercises repository selection through chapter rendering.
@@ -59,7 +61,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 
 	asset := perform(app, http.MethodGet, "/assets/application.js", "")
-	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") || !strings.Contains(asset.Body.String(), "diagram-viewer") || !strings.Contains(asset.Body.String(), "block-reference") || !strings.Contains(asset.Body.String(), "chapter-navigation") {
+	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") || !strings.Contains(asset.Body.String(), "diagram-viewer") || !strings.Contains(asset.Body.String(), "block-reference") || !strings.Contains(asset.Body.String(), "chapter-navigation") || !strings.Contains(asset.Body.String(), "comment-thread") {
 		t.Fatalf("embedded asset unavailable: %d", asset.Code)
 	}
 	blockController := perform(app, http.MethodGet, "/assets/controllers/block_reference_controller.js", "")
@@ -70,6 +72,10 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	if chapterController.Code != http.StatusOK || !strings.Contains(chapterController.Body.String(), "scrollIntoView") || strings.Contains(chapterController.Body.String(), "history.pushState") || strings.Contains(chapterController.Body.String(), "history.replaceState") {
 		t.Fatalf("chapter navigation does not scroll in place: %d", chapterController.Code)
 	}
+	commentController := perform(app, http.MethodGet, "/assets/controllers/comment_thread_controller.js", "")
+	if commentController.Code != http.StatusOK || !strings.Contains(commentController.Body.String(), "event.shiftKey") || !strings.Contains(commentController.Body.String(), "enhanceDiff") {
+		t.Fatalf("comment thread controller unavailable: %d", commentController.Code)
+	}
 	diagramController := perform(app, http.MethodGet, "/assets/controllers/diagram_viewer_controller.js", "")
 	if diagramController.Code != http.StatusOK || !strings.Contains(diagramController.Body.String(), "showModal") {
 		t.Fatalf("diagram viewer controller unavailable: %d", diagramController.Code)
@@ -79,7 +85,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		t.Fatalf("diff layout is not URL-backed: %d", diffController.Code)
 	}
 	styles := perform(app, http.MethodGet, "/assets/styles/application.css", "")
-	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", ".chapter-rail { position: sticky", ".callout, .review-question, .chapter-takeaway { width: 100%"} {
+	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", "--color-comment-marker:", ".chapter-rail { position: sticky", ".callout, .review-question, .chapter-takeaway { width: 100%", ".discussion-panel"} {
 		if !strings.Contains(styles.Body.String(), expected) {
 			t.Errorf("theme stylesheet missing %q", expected)
 		}
@@ -92,6 +98,74 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	generatedChapter := perform(app, http.MethodGet, reviewPath+"/steps/generated", "")
 	if generatedChapter.Code != http.StatusOK || !strings.Contains(generatedChapter.Body.String(), "<details class=\"evidence-disclosure\">") {
 		t.Fatalf("mechanical evidence is not collapsed: %d", generatedChapter.Code)
+	}
+}
+
+// TestAppPersistsAddressableBlockCodeAndReplyComments exercises the browser discussion flow.
+func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
+	repository := featureRepository(t)
+	app, err := NewApp(repository, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := perform(app, http.MethodPost, "/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
+	reviewPath := strings.Split(created.Header().Get("Location"), "?")[0]
+	reviewID := strings.TrimPrefix(reviewPath, "/reviews/")
+
+	opening := perform(app, http.MethodPost, reviewPath+"/blocks/domain-intro/threads", url.Values{
+		"target_type": {"block"}, "author": {"Alex"}, "body": {"Please explain this boundary."},
+	}.Encode())
+	if opening.Code != http.StatusSeeOther || !strings.Contains(opening.Header().Get("Location"), reviewPath+"/threads/thread-") {
+		t.Fatalf("block comment failed: %d %s", opening.Code, opening.Body.String())
+	}
+	store, _ := patchreview.NewStore(repository, nil)
+	stored, _ := store.Find(reviewID)
+	discussion, err := store.ReadDiscussion(stored)
+	if err != nil || len(discussion.Threads) != 1 {
+		t.Fatalf("comment was not persisted: %v %#v", err, discussion)
+	}
+	thread := discussion.Threads[0]
+	threadPage := perform(app, http.MethodGet, reviewPath+"/threads/"+thread.ID, "")
+	for _, expected := range []string{"Please explain this boundary.", "comment-thread is-focused", reviewPath + "/comments/" + thread.Comments[0].ID, "data-controller=\"comment-thread\""} {
+		if !strings.Contains(threadPage.Body.String(), expected) {
+			t.Errorf("thread page missing %q", expected)
+		}
+	}
+
+	reply := perform(app, http.MethodPost, reviewPath+"/threads/"+thread.ID+"/replies", url.Values{"author": {"Reviewer 2"}, "body": {"The service owns the persistence boundary."}}.Encode())
+	if reply.Code != http.StatusSeeOther || !strings.Contains(reply.Header().Get("Location"), reviewPath+"/comments/comment-") {
+		t.Fatalf("reply failed: %d %s", reply.Code, reply.Body.String())
+	}
+	resolved := perform(app, http.MethodPost, reviewPath+"/threads/"+thread.ID+"/resolution", url.Values{"resolved": {"true"}}.Encode())
+	if resolved.Code != http.StatusSeeOther {
+		t.Fatalf("resolve failed: %d %s", resolved.Code, resolved.Body.String())
+	}
+	discussion, _ = store.ReadDiscussion(stored)
+	if !discussion.Threads[0].Resolved {
+		t.Fatal("thread resolution was not persisted")
+	}
+
+	diffBlock := stored.Review.Steps[0].Blocks[1]
+	lineThread := perform(app, http.MethodPost, reviewPath+"/blocks/"+diffBlock.ID+"/threads", url.Values{
+		"target_type": {"code"}, "path": {diffBlock.Path}, "side": {"target"}, "start_line": {"1"}, "end_line": {"2"},
+		"author": {"Alex"}, "body": {"These two lines belong together."},
+	}.Encode())
+	if lineThread.Code != http.StatusSeeOther {
+		t.Fatalf("line comment failed: %d %s", lineThread.Code, lineThread.Body.String())
+	}
+	discussion, _ = store.ReadDiscussion(stored)
+	anchor := discussion.Threads[1].Target
+	if anchor.CommitSHA != stored.Review.Source.TargetSHA || anchor.StartLine != 1 || anchor.EndLine != 2 {
+		t.Fatalf("line anchor was not tied to target source: %#v", anchor)
+	}
+
+	crossOrigin := httptest.NewRequest(http.MethodPost, reviewPath+"/blocks/domain-intro/threads", strings.NewReader(url.Values{"author": {"Mallory"}, "body": {"cross-site"}}.Encode()))
+	crossOrigin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	crossOrigin.Header.Set("Origin", "https://attacker.example")
+	crossOriginResponse := httptest.NewRecorder()
+	app.ServeHTTP(crossOriginResponse, crossOrigin)
+	if crossOriginResponse.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin mutation returned %d", crossOriginResponse.Code)
 	}
 }
 

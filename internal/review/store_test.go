@@ -55,6 +55,71 @@ func TestStoreFindBlockResolvesChapterContext(t *testing.T) {
 	}
 }
 
+// TestDiscussionServicePersistsBlockLinesAndReplies covers the complete mutable artifact path.
+func TestDiscussionServicePersistsBlockLinesAndReplies(t *testing.T) {
+	directory := testRepository(t)
+	repository, _ := gitrepo.Open(directory)
+	store, _ := NewStore(repository.Root(), nil)
+	stored, err := (&Creator{Repository: repository, Store: store}).Create("main", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffBlock := stored.Review.Steps[0].Blocks[1]
+	ids := []string{"thread-domain", "comment-opening", "comment-reply"}
+	service := &DiscussionService{
+		Store: store,
+		Now:   func() time.Time { return time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC) },
+		NewID: func(_ string) (string, error) {
+			id := ids[0]
+			ids = ids[1:]
+			return id, nil
+		},
+	}
+	thread, err := service.CreateThread(stored.Review.ID, NewThread{
+		BlockID: diffBlock.ID, TargetType: "code", Path: diffBlock.Path, Side: "target",
+		StartLine: 2, EndLine: 2, Author: "Alex", AuthorKind: "human", Body: "Is this exported behavior intentional?",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thread.Target.CommitSHA != stored.Review.Source.TargetSHA || thread.Comments[0].ID != "comment-opening" {
+		t.Fatalf("unexpected persisted anchor: %#v", thread)
+	}
+	reply, err := service.Reply(stored.Review.ID, thread.ID, NewReply{Author: "Patchflow Agent", AuthorKind: "agent", Body: "Yes; callers use it directly."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply.ID != "comment-reply" || reply.ReplyTo != "comment-opening" {
+		t.Fatalf("unexpected reply: %#v", reply)
+	}
+	location, err := store.FindComment(stored.Review.ID, reply.ID)
+	if err != nil || location.Discussion.Threads[location.ThreadIndex].Target.StartLine != 2 {
+		t.Fatalf("comment lookup lost its source anchor: %v %#v", err, location)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(stored.Path), "comments.yaml")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestDiscussionServiceRejectsMismatchedCodeAnchors keeps browser and agent input inside its block.
+func TestDiscussionServiceRejectsMismatchedCodeAnchors(t *testing.T) {
+	directory := testRepository(t)
+	repository, _ := gitrepo.Open(directory)
+	store, _ := NewStore(repository.Root(), nil)
+	stored, err := (&Creator{Repository: repository, Store: store}).Create("main", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffBlock := stored.Review.Steps[0].Blocks[1]
+	_, err = (&DiscussionService{Store: store}).CreateThread(stored.Review.ID, NewThread{
+		BlockID: diffBlock.ID, TargetType: "code", Path: "outside.go", Side: "target",
+		StartLine: 1, EndLine: 1, Author: "Alex", AuthorKind: "human", Body: "Unsafe anchor",
+	})
+	if err == nil || !strings.Contains(err.Error(), "must match block") {
+		t.Fatalf("mismatched path accepted: %v", err)
+	}
+}
+
 // TestStoreRejectsPatchflowSymlinkEscape protects writes from a redirected artifact root.
 func TestStoreRejectsPatchflowSymlinkEscape(t *testing.T) {
 	directory := testRepository(t)

@@ -3,8 +3,52 @@ package artifact
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// TestDiscussionValidatorProtectsReplyOrder verifies the standalone comments contract.
+func TestDiscussionValidatorProtectsReplyOrder(t *testing.T) {
+	validator, err := NewDiscussionValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := `schema_version: 1
+review_id: review-123
+updated_at: "2026-08-19T08:00:00Z"
+threads:
+  - id: thread-a
+    target:
+      type: code
+      block_id: domain-code
+      path: cmd/app/main.go
+      side: target
+      commit_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      start_line: 10
+      end_line: 12
+    resolved: false
+    comments:
+      - id: comment-a
+        author: Alex
+        author_kind: human
+        body: Why is this boundary here?
+        created_at: "2026-08-19T08:00:00Z"
+      - id: comment-b
+        author: Patchflow Agent
+        author_kind: agent
+        body: It keeps persistence behind the service.
+        created_at: "2026-08-19T08:01:00Z"
+        reply_to: comment-a
+`
+	parsed, err := validator.Parse([]byte(valid))
+	if err != nil || len(parsed.Threads) != 1 {
+		t.Fatalf("valid discussion rejected: %v", err)
+	}
+	invalid := strings.Replace(valid, "reply_to: comment-a", "reply_to: missing-comment", 1)
+	if _, err := validator.Parse([]byte(invalid)); err == nil || !strings.Contains(err.Error(), "earlier comment") {
+		t.Fatalf("invalid reply relationship accepted: %v", err)
+	}
+}
 
 // TestSharedV2Fixtures keeps the Go validator aligned with documented valid and invalid examples.
 func TestSharedV2Fixtures(t *testing.T) {

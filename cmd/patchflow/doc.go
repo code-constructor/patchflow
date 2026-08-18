@@ -1,2 +1,2 @@
-// Package main provides the patchflow create, validate, and serve commands.
+// Package main provides Patchflow's review, validation, discussion, and server commands.
 package main

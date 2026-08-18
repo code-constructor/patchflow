@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -103,10 +104,15 @@ type BlockView struct {
 	Highlights      string
 	DiagramMarkdown string
 	ReferencePath   string
+	ReferenceLabel  string
 	Label           string
 	StartLine       int
 	EndLine         int
 	CodeLines       []CodeLine
+	Threads         []ThreadView
+	ThreadAction    string
+	ThreadAnchors   string
+	Commentable     bool
 	Focused         bool
 	Collapsed       bool
 }
@@ -115,6 +121,34 @@ type BlockView struct {
 type CodeLine struct {
 	Number int
 	HTML   template.HTML
+	Side   string
+}
+
+// ThreadView is one discussion rendered beneath its addressed evidence block.
+type ThreadView struct {
+	ID               string
+	TargetLabel      string
+	ReferencePath    string
+	ReferenceLabel   string
+	ReplyAction      string
+	ResolutionAction string
+	ResolutionLabel  string
+	ResolutionValue  string
+	Resolved         bool
+	Focused          bool
+	Comments         []CommentView
+}
+
+// CommentView is one human or agent message with a stable reference path.
+type CommentView struct {
+	ID             string
+	Author         string
+	AuthorKind     string
+	Body           string
+	CreatedAt      string
+	ReferencePath  string
+	ReferenceLabel string
+	Focused        bool
 }
 
 // RepositoryPickerView describes one directory level inside the browse boundary.
@@ -199,6 +233,16 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.newReview(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/reviews":
 		a.createReview(w, r)
+	case r.Method == http.MethodPost && matchActionPath(r.URL.Path, "blocks", "threads"):
+		a.createThread(w, r)
+	case r.Method == http.MethodPost && matchActionPath(r.URL.Path, "threads", "replies"):
+		a.createReply(w, r)
+	case r.Method == http.MethodPost && matchActionPath(r.URL.Path, "threads", "resolution"):
+		a.updateThreadResolution(w, r)
+	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/comments/"):
+		a.comment(w, r)
+	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/threads/"):
+		a.thread(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/blocks/"):
 		a.block(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/steps/"):
@@ -371,11 +415,11 @@ func (a *App) chapter(w http.ResponseWriter, r *http.Request) {
 		redirect(w, r, "/reviews/"+stored.Review.ID, "alert", "Review step not found.")
 		return
 	}
-	a.renderChapter(w, repository, store, stored, stepIndex, "")
+	a.renderChapter(w, repository, store, stored, stepIndex, "", "", "", r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
 }
 
 // renderChapter resolves one step and optionally highlights an addressed block.
-func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, stepIndex int, focusedBlockID string) {
+func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, stepIndex int, focusedBlockID, focusedThreadID, focusedCommentID, notice, alert string) {
 	step := stored.Review.Steps[stepIndex]
 	chapter := ChapterView{ReviewID: stored.Review.ID, Number: stepIndex + 1, Total: len(stored.Review.Steps), Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, ReviewQuestion: step.ReviewQuestion, Attention: step.Attention, DesignGate: step.Priority == "critical" && step.ReviewQuestion != ""}
 	if stepIndex > 0 {
@@ -394,14 +438,23 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 	for _, file := range stored.Review.Change.Files {
 		files[file.Path] = file
 	}
+	discussion, discussionErr := store.ReadDiscussion(stored)
+	if discussionErr != nil {
+		alert = discussionErr.Error()
+		discussion = &artifact.Discussion{Threads: []artifact.Thread{}}
+	}
 	for _, block := range blocks {
 		view := buildBlock(repository, store, stored, files, block)
 		view.ReferencePath = "/reviews/" + stored.Review.ID + "/blocks/" + block.ID
+		view.ReferenceLabel = "block " + block.ID
 		view.Label = blockLabel(block)
 		view.Focused = block.ID == focusedBlockID
+		view.Commentable = stored.Review.SchemaVersion == 2
+		view.ThreadAction = view.ReferencePath + "/threads"
+		view.Threads, view.ThreadAnchors = buildThreadViews(stored.Review.ID, block.ID, discussion, focusedThreadID, focusedCommentID)
 		chapter.Blocks = append(chapter.Blocks, view)
 	}
-	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", RepositoryName: repository.Name(), Chapter: &chapter}, http.StatusOK)
+	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", RepositoryName: repository.Name(), Chapter: &chapter, Notice: notice, Alert: alert}, http.StatusOK)
 }
 
 // block renders the current chapter for a globally unique block ID.
@@ -434,11 +487,172 @@ func (a *App) block(w http.ResponseWriter, r *http.Request) {
 			if block.ID != parts[3] {
 				continue
 			}
-			a.renderChapter(w, repository, store, stored, stepIndex, block.ID)
+			a.renderChapter(w, repository, store, stored, stepIndex, block.ID, "", "", r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
 			return
 		}
 	}
 	http.NotFound(w, r)
+}
+
+// thread renders the chapter containing one stable discussion reference.
+func (a *App) thread(w http.ResponseWriter, r *http.Request) {
+	a.renderDiscussionReference(w, r, "threads")
+}
+
+// comment renders the chapter containing one stable message reference.
+func (a *App) comment(w http.ResponseWriter, r *http.Request) {
+	a.renderDiscussionReference(w, r, "comments")
+}
+
+// renderDiscussionReference resolves a thread or comment to its containing chapter.
+func (a *App) renderDiscussionReference(w http.ResponseWriter, r *http.Request, kind string) {
+	repository, ok := a.requireRepository(w, r)
+	if !ok {
+		return
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "reviews" || parts[2] != kind {
+		http.NotFound(w, r)
+		return
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	focusedThreadID, focusedCommentID := "", ""
+	var blockID string
+	if kind == "threads" {
+		location, findErr := store.FindThread(parts[1], parts[3])
+		if findErr != nil {
+			http.NotFound(w, r)
+			return
+		}
+		focusedThreadID = parts[3]
+		blockID = location.Discussion.Threads[location.ThreadIndex].Target.BlockID
+	} else {
+		location, findErr := store.FindComment(parts[1], parts[3])
+		if findErr != nil {
+			http.NotFound(w, r)
+			return
+		}
+		focusedCommentID = parts[3]
+		thread := location.Discussion.Threads[location.ThreadIndex]
+		focusedThreadID = thread.ID
+		blockID = thread.Target.BlockID
+	}
+	blockLocation, err := store.FindBlock(parts[1], blockID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	a.renderChapter(w, repository, store, blockLocation.Stored, blockLocation.StepIndex, blockID, focusedThreadID, focusedCommentID, r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
+}
+
+// createThread persists a block or selected source-range comment from the chapter UI.
+func (a *App) createThread(w http.ResponseWriter, r *http.Request) {
+	if !validMutationOrigin(r) {
+		http.Error(w, "Cross-origin form submission rejected", http.StatusForbidden)
+		return
+	}
+	repository, ok := a.requireRepository(w, r)
+	if !ok {
+		return
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 5 || parts[0] != "reviews" || parts[2] != "blocks" || parts[4] != "threads" {
+		http.NotFound(w, r)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+	startLine, startErr := parseOptionalLine(r.FormValue("start_line"))
+	endLine, endErr := parseOptionalLine(r.FormValue("end_line"))
+	if startErr != nil || endErr != nil {
+		http.Error(w, "Comment line numbers must be positive integers", http.StatusUnprocessableEntity)
+		return
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err == nil {
+		thread, createErr := (&patchreview.DiscussionService{Store: store}).CreateThread(parts[1], patchreview.NewThread{
+			BlockID: parts[3], TargetType: r.FormValue("target_type"), Path: r.FormValue("path"), Side: r.FormValue("side"),
+			StartLine: startLine, EndLine: endLine, Author: r.FormValue("author"), AuthorKind: "human", Body: r.FormValue("body"),
+		})
+		if createErr == nil {
+			redirect(w, r, "/reviews/"+parts[1]+"/threads/"+thread.ID, "notice", "Comment saved.")
+			return
+		}
+		err = createErr
+	}
+	http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+}
+
+// createReply persists a human response to an existing discussion.
+func (a *App) createReply(w http.ResponseWriter, r *http.Request) {
+	if !validMutationOrigin(r) {
+		http.Error(w, "Cross-origin form submission rejected", http.StatusForbidden)
+		return
+	}
+	repository, ok := a.requireRepository(w, r)
+	if !ok {
+		return
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 5 || parts[0] != "reviews" || parts[2] != "threads" || parts[4] != "replies" {
+		http.NotFound(w, r)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err == nil {
+		created, replyErr := (&patchreview.DiscussionService{Store: store}).Reply(parts[1], parts[3], patchreview.NewReply{ReplyTo: r.FormValue("reply_to"), Author: r.FormValue("author"), AuthorKind: "human", Body: r.FormValue("body")})
+		if replyErr == nil {
+			redirect(w, r, "/reviews/"+parts[1]+"/comments/"+created.ID, "notice", "Reply saved.")
+			return
+		}
+		err = replyErr
+	}
+	http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+}
+
+// updateThreadResolution resolves or reopens one persisted discussion.
+func (a *App) updateThreadResolution(w http.ResponseWriter, r *http.Request) {
+	if !validMutationOrigin(r) {
+		http.Error(w, "Cross-origin form submission rejected", http.StatusForbidden)
+		return
+	}
+	repository, ok := a.requireRepository(w, r)
+	if !ok {
+		return
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 5 || parts[0] != "reviews" || parts[2] != "threads" || parts[4] != "resolution" {
+		http.NotFound(w, r)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+	resolved := r.FormValue("resolved") == "true"
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err == nil {
+		_, err = (&patchreview.DiscussionService{Store: store}).SetResolved(parts[1], parts[3], resolved)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	message := "Thread reopened."
+	if resolved {
+		message = "Thread resolved."
+	}
+	redirect(w, r, "/reviews/"+parts[1]+"/threads/"+parts[3], "notice", message)
 }
 
 // buildBlock joins a declarative artifact block with evidence from its recorded commits.
@@ -471,6 +685,9 @@ func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored
 			view.Error = err.Error()
 		} else {
 			view.CodeLines = highlightCode(block.Path, source, block.StartLine)
+			for index := range view.CodeLines {
+				view.CodeLines[index].Side = block.Source
+			}
 		}
 	case "diagram":
 		source, err := store.ReadAsset(stored, block.Path)
@@ -481,6 +698,63 @@ func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored
 		}
 	}
 	return view
+}
+
+// buildThreadViews filters one discussion to a block and prepares stable UI references.
+func buildThreadViews(reviewID, blockID string, discussion *artifact.Discussion, focusedThreadID, focusedCommentID string) ([]ThreadView, string) {
+	views := []ThreadView{}
+	anchors := []map[string]any{}
+	for _, thread := range discussion.Threads {
+		if thread.Target.BlockID != blockID {
+			continue
+		}
+		view := ThreadView{
+			ID:               thread.ID,
+			TargetLabel:      threadTargetLabel(thread.Target),
+			ReferencePath:    "/reviews/" + reviewID + "/threads/" + thread.ID,
+			ReferenceLabel:   "thread " + thread.ID,
+			ReplyAction:      "/reviews/" + reviewID + "/threads/" + thread.ID + "/replies",
+			ResolutionAction: "/reviews/" + reviewID + "/threads/" + thread.ID + "/resolution",
+			Resolved:         thread.Resolved,
+			Focused:          thread.ID == focusedThreadID,
+		}
+		if thread.Resolved {
+			view.ResolutionLabel = "Reopen"
+			view.ResolutionValue = "false"
+		} else {
+			view.ResolutionLabel = "Resolve"
+			view.ResolutionValue = "true"
+		}
+		if thread.Target.Type == "code" {
+			anchors = append(anchors, map[string]any{"id": thread.ID, "side": thread.Target.Side, "start": thread.Target.StartLine, "end": thread.Target.EndLine})
+		}
+		for _, comment := range thread.Comments {
+			view.Comments = append(view.Comments, CommentView{
+				ID:             comment.ID,
+				Author:         comment.Author,
+				AuthorKind:     comment.AuthorKind,
+				Body:           comment.Body,
+				CreatedAt:      comment.CreatedAt,
+				ReferencePath:  "/reviews/" + reviewID + "/comments/" + comment.ID,
+				ReferenceLabel: "comment " + comment.ID,
+				Focused:        comment.ID == focusedCommentID,
+			})
+		}
+		views = append(views, view)
+	}
+	encoded, _ := json.Marshal(anchors)
+	return views, string(encoded)
+}
+
+// threadTargetLabel describes an anchor without requiring the source block beside it.
+func threadTargetLabel(target artifact.ThreadTarget) string {
+	if target.Type == "block" {
+		return "Entire block"
+	}
+	if target.StartLine == target.EndLine {
+		return fmt.Sprintf("%s · %s line %d", target.Path, target.Side, target.StartLine)
+	}
+	return fmt.Sprintf("%s · %s lines %d–%d", target.Path, target.Side, target.StartLine, target.EndLine)
 }
 
 // blockLabel produces a compact chapter-navigation label from block semantics.
@@ -603,6 +877,34 @@ func humanize(value string) string { return strings.Title(strings.ReplaceAll(val
 // matchPath extracts one path segment after a fixed route prefix.
 func matchPath(path, prefix, separator string) bool {
 	return strings.HasPrefix(path, prefix) && strings.Contains(strings.TrimPrefix(path, prefix), separator)
+}
+
+// matchActionPath recognizes five-segment nested mutation routes.
+func matchActionPath(path, resource, action string) bool {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	return len(parts) == 5 && parts[0] == "reviews" && parts[2] == resource && parts[4] == action
+}
+
+// parseOptionalLine accepts an absent line or one positive decimal line number.
+func parseOptionalLine(value string) (int, error) {
+	if value == "" {
+		return 0, nil
+	}
+	line, err := strconv.Atoi(value)
+	if err != nil || line < 1 {
+		return 0, fmt.Errorf("line number must be positive")
+	}
+	return line, nil
+}
+
+// validMutationOrigin rejects browser writes initiated by a different origin.
+func validMutationOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host == r.Host
 }
 
 // discoverBrowseRoot chooses the narrowest useful root for the repository picker.

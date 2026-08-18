@@ -12,36 +12,68 @@
 
 {{define "markdown"}}<div data-controller="review-document"><pre class="markdown-source" data-review-document-target="source">{{.}}</pre><div class="markdown" data-review-document-target="output"></div></div>{{end}}
 
-{{define "block_reference"}}<button type="button" class="block-copy" data-controller="block-reference" data-block-reference-path-value="{{.ReferencePath}}" data-action="block-reference#copy" aria-label="Copy path for block {{.ID}}" title="Copy block path">
+{{define "reference"}}<button type="button" class="block-copy" data-controller="block-reference" data-block-reference-path-value="{{.ReferencePath}}" data-action="block-reference#copy" aria-label="Copy path for {{.ReferenceLabel}}" title="Copy reference path">
   <svg class="block-copy__icon" data-block-reference-target="copyIcon" aria-hidden="true" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>
   <svg class="block-copy__icon" data-block-reference-target="copiedIcon" aria-hidden="true" viewBox="0 0 24 24" hidden><path d="m5 12 4 4L19 6"></path></svg>
   <span class="visually-hidden" data-block-reference-target="status" aria-live="polite"></span>
 </button>{{end}}
 
+{{define "discussion"}}
+  {{if .Commentable}}<section class="discussion-panel" aria-label="Discussion for {{.ReferenceLabel}}">
+    {{if .Threads}}<div class="thread-list">{{range .Threads}}<article class="comment-thread{{if .Focused}} is-focused{{end}}" id="{{.ID}}">
+      <header class="comment-thread__header"><div><span class="eyebrow">{{if .Resolved}}Resolved thread{{else}}Open thread{{end}}</span><strong>{{.TargetLabel}}</strong></div><div class="comment-thread__actions"><form method="post" action="{{.ResolutionAction}}"><input type="hidden" name="resolved" value="{{.ResolutionValue}}"><button type="submit" class="button-link">{{.ResolutionLabel}}</button></form>{{template "reference" .}}</div></header>
+      <div class="comment-list">{{range .Comments}}<article class="comment{{if .Focused}} is-focused{{end}}" id="{{.ID}}">
+        <header class="comment__header"><div><strong>{{.Author}}</strong><span class="author-kind author-kind--{{.AuthorKind}}">{{.AuthorKind}}</span><time datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></div>{{template "reference" .}}</header>
+        {{template "markdown" .Body}}
+      </article>{{end}}</div>
+      <details class="reply-composer"><summary>Reply to thread</summary><form method="post" action="{{.ReplyAction}}" class="comment-form">
+        <label>Your name<input name="author" value="Reviewer" required></label>
+        <label>Reply<textarea name="body" required placeholder="Add context, answer the question, or explain a concern."></textarea></label>
+        <button class="button button--small" type="submit">Add reply</button>
+      </form></details>
+    </article>{{end}}</div>{{end}}
+    <details class="comment-composer" data-comment-thread-target="details"><summary><span data-comment-thread-target="selectionLabel">Comment on entire block</span></summary>
+      <form method="post" action="{{.ThreadAction}}" class="comment-form">
+        <input type="hidden" name="target_type" value="block" data-comment-thread-target="targetType">
+        <input type="hidden" name="path" value="{{.Path}}">
+        <input type="hidden" name="side" value="{{.SourceSide}}" data-comment-thread-target="side">
+        <input type="hidden" name="start_line" data-comment-thread-target="startLine">
+        <input type="hidden" name="end_line" data-comment-thread-target="endLine">
+        <div class="comment-selection" data-comment-thread-target="selection" hidden><span></span><button type="button" class="button-link" data-action="comment-thread#resetTarget">Comment on block instead</button></div>
+        <label>Your name<input name="author" value="Reviewer" required></label>
+        <label>Comment<textarea name="body" required data-comment-thread-target="body" placeholder="What should the reviewer or agent know?"></textarea></label>
+        <button class="button button--small" type="submit">Start thread</button>
+      </form>
+    </details>
+  </section>{{end}}
+{{end}}
+
 {{define "block"}}
   {{if eq .Type "prose"}}
-    <section class="review-block review-block--prose{{if .Focused}} is-focused{{end}}" id="{{.ID}}"><div class="block-reference-row">{{template "block_reference" .}}</div>{{template "markdown" .Body}}</section>
+    <section class="review-block review-block--prose{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-reference-row">{{template "reference" .}}</div>{{template "markdown" .Body}}{{template "discussion" .}}</section>
   {{else if eq .Type "callout"}}
-    <aside class="review-block callout callout--{{.Kind}}{{if .Focused}} is-focused{{end}}" id="{{.ID}}"><div class="block-heading"><div class="eyebrow">{{.Kind}}</div>{{template "block_reference" .}}</div>{{template "markdown" .Body}}</aside>
+    <aside class="review-block callout callout--{{.Kind}}{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-heading"><div class="eyebrow">{{.Kind}}</div>{{template "reference" .}}</div>{{template "markdown" .Body}}{{template "discussion" .}}</aside>
   {{else if eq .Type "question"}}
-    <aside class="review-block review-question{{if .Focused}} is-focused{{end}}" id="{{.ID}}"><div class="block-heading"><div class="eyebrow">Open question</div>{{template "block_reference" .}}</div>{{template "markdown" .Body}}</aside>
+    <aside class="review-block review-question{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-heading"><div class="eyebrow">Open question</div>{{template "reference" .}}</div>{{template "markdown" .Body}}{{template "discussion" .}}</aside>
   {{else if eq .Type "takeaway"}}
-    <aside class="review-block chapter-takeaway{{if .Focused}} is-focused{{end}}" id="{{.ID}}"><div class="block-heading"><div class="eyebrow">Chapter takeaway</div>{{template "block_reference" .}}</div>{{template "markdown" .Body}}</aside>
+    <aside class="review-block chapter-takeaway{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-heading"><div class="eyebrow">Chapter takeaway</div>{{template "reference" .}}</div>{{template "markdown" .Body}}{{template "discussion" .}}</aside>
   {{else if eq .Type "diff"}}
-    <section class="review-block card code-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}">
-      <header class="code-card__header"><div><div class="eyebrow">Changed file</div><h3>{{.Path}}</h3></div><div class="code-card__meta">{{if .Focus}}<span class="focus-label">{{.Focus}}</span>{{end}}{{template "block_reference" .}}</div></header>
+    <section class="review-block card code-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}" data-action="patchflow:diff-rendered->comment-thread#enhanceDiff">
+      <header class="code-card__header"><div><div class="eyebrow">Changed file</div><h3>{{.Path}}</h3></div><div class="code-card__meta">{{if .Focus}}<span class="focus-label">{{.Focus}}</span>{{end}}{{template "reference" .}}</div></header>
       {{if .Error}}<div class="diff-notice"><strong>Diff not displayed</strong><p>{{.Error}}. Review this generated or unusually large file directly in the repository.</p></div>{{else if .Collapsed}}<details class="evidence-disclosure"><summary>Show supporting diff</summary>{{template "diff" .}}</details>{{else}}{{template "diff" .}}{{end}}
+      {{template "discussion" .}}
     </section>
   {{else if eq .Type "code"}}
-    <section class="review-block card code-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}">
-      <header class="code-card__header"><div><div class="eyebrow">{{.SourceSide}} source</div><h3>{{.Path}}</h3></div><div class="code-card__meta"><span class="focus-label">lines {{.StartLine}}–{{.EndLine}}</span>{{template "block_reference" .}}</div></header>
-      {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}<div class="code-excerpt">{{range .CodeLines}}<div class="code-excerpt__line"><span class="code-excerpt__number">{{.Number}}</span><code>{{.HTML}}</code></div>{{end}}</div>{{end}}
+    <section class="review-block card code-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}">
+      <header class="code-card__header"><div><div class="eyebrow">{{.SourceSide}} source</div><h3>{{.Path}}</h3></div><div class="code-card__meta"><span class="focus-label">lines {{.StartLine}}–{{.EndLine}}</span>{{template "reference" .}}</div></header>
+      {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}<div class="code-excerpt">{{range .CodeLines}}<div class="code-excerpt__line" data-comment-line="{{.Number}}" data-comment-side="{{.Side}}"><button type="button" class="line-comment-button" data-line="{{.Number}}" data-side="{{.Side}}" data-action="comment-thread#selectLine" aria-label="Comment on {{.Side}} line {{.Number}}">+</button><span class="code-excerpt__number">{{.Number}}</span><code>{{.HTML}}</code></div>{{end}}</div>{{end}}
+      {{template "discussion" .}}
     </section>
   {{else if eq .Type "diagram"}}
-    <section class="review-block card diagram-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="diagram-viewer" data-action="click->diagram-viewer#expand">
+    <section class="review-block card diagram-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="diagram-viewer comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}" data-action="click->diagram-viewer#expand">
       <header class="diagram-card__header">
         <div class="eyebrow">Diagram</div>
-        <div class="diagram-card__actions">{{template "block_reference" .}}{{if not .Error}}<button type="button" class="diagram-expand" aria-label="Open diagram in fullscreen"><span aria-hidden="true">⛶</span> Expand</button>{{end}}</div>
+        <div class="diagram-card__actions">{{template "reference" .}}{{if not .Error}}<button type="button" class="diagram-expand" aria-label="Open diagram in fullscreen"><span aria-hidden="true">⛶</span> Expand</button>{{end}}</div>
       </header>
       {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}{{template "markdown" .DiagramMarkdown}}{{end}}
       {{if not .Error}}
@@ -52,6 +84,7 @@
           </div>
         </dialog>
       {{end}}
+      {{template "discussion" .}}
     </section>
   {{end}}
 {{end}}
