@@ -84,14 +84,15 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	if !strings.HasPrefix(reviewPath, "/repositories/") || !strings.Contains(reviewPath, "/reviews/") {
 		t.Fatalf("unexpected redirect %q", location)
 	}
+	basePath := strings.Split(reviewPath, "/reviews/")[0]
 
 	overview := perform(app, http.MethodGet, reviewPath, "")
-	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/steps/domain\"") || !strings.Contains(overview.Body.String(), "href=\"https://github.com/traqx-ai/patchflow\"") || !strings.Contains(overview.Body.String(), "aria-label=\"Open repository on GitHub\"") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/files/app/controllers/sessions_controller.rb\"") || !strings.Contains(overview.Body.String(), "data-review-tabs-view-value=\"plan\"") {
+	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/steps/domain\"") || !strings.Contains(overview.Body.String(), "href=\"https://github.com/traqx-ai/patchflow\"") || !strings.Contains(overview.Body.String(), "aria-label=\"Open repository on GitHub\"") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/files/app/controllers/sessions_controller.rb\"") || !strings.Contains(overview.Body.String(), "data-review-tabs-view-value=\"plan\"") || !strings.Contains(overview.Body.String(), "data-navigation-fallback-value=\""+basePath+"\"") || !strings.Contains(overview.Body.String(), "data-action=\"navigation#back\"") {
 		t.Fatalf("unexpected overview: %d %s", overview.Code, overview.Body.String())
 	}
 
 	chapter := perform(app, http.MethodGet, reviewPath+"/steps/domain", "")
-	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\"", "id=\"domain-intro\"", "id=\"review-block-domain-intro\"", "class=\"review-block-frame\"", "type=\"button\"", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-intro\"", "aria-label=\"Copy path for block domain-intro\"", "data-controller=\"chapter-navigation\"", "Review question", "Does the domain behavior", "Chapter takeaway", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-takeaway\"", "href=\"/\" class=\"repository-overview-link\"", "href=\"https://github.com/traqx-ai/patchflow\""} {
+	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\"", "id=\"domain-intro\"", "id=\"review-block-domain-intro\"", "class=\"review-block-frame\"", "type=\"button\"", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-intro\"", "aria-label=\"Copy path for block domain-intro\"", "data-controller=\"chapter-navigation\"", "Review question", "Does the domain behavior", "Chapter takeaway", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-takeaway\"", "class=\"site-action site-action--workspace\"", "href=\"" + reviewPath + "\" class=\"site-action\" aria-label=\"Review overview\"", "data-navigation-fallback-value=\"" + reviewPath + "\"", "href=\"https://github.com/traqx-ai/patchflow\"", "class=\"chapter-step-nav\"", "href=\"" + reviewPath + "/steps/security\" rel=\"prev\"", "aria-label=\"Previous step: Inspect security-sensitive behavior\"", "href=\"" + reviewPath + "/steps/tests\" rel=\"next\"", "aria-label=\"Next step: Verify the intended behavior\""} {
 		if !strings.Contains(chapter.Body.String(), expected) {
 			t.Errorf("chapter missing %q", expected)
 		}
@@ -146,7 +147,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 
 	asset := perform(app, http.MethodGet, "/assets/application.js", "")
-	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") || !strings.Contains(asset.Body.String(), "diagram-viewer") || !strings.Contains(asset.Body.String(), "image-viewer") || !strings.Contains(asset.Body.String(), "block-reference") || !strings.Contains(asset.Body.String(), "chapter-navigation") || !strings.Contains(asset.Body.String(), "comment-thread") || !strings.Contains(asset.Body.String(), "review-tabs") || !strings.Contains(asset.Body.String(), "file-review") || !strings.Contains(asset.Body.String(), "viewed") {
+	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") || !strings.Contains(asset.Body.String(), "diagram-viewer") || !strings.Contains(asset.Body.String(), "image-viewer") || !strings.Contains(asset.Body.String(), "block-reference") || !strings.Contains(asset.Body.String(), "chapter-navigation") || !strings.Contains(asset.Body.String(), "comment-thread") || !strings.Contains(asset.Body.String(), "review-tabs") || !strings.Contains(asset.Body.String(), "file-review") || !strings.Contains(asset.Body.String(), "viewed") || !strings.Contains(asset.Body.String(), "navigation") || !strings.Contains(asset.Body.String(), "plan-file-disclosure") {
 		t.Fatalf("embedded asset unavailable: %d", asset.Code)
 	}
 	blockController := perform(app, http.MethodGet, "/assets/controllers/block_reference_controller.js", "")
@@ -186,27 +187,41 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		}
 	}
 	viewedController := perform(app, http.MethodGet, "/assets/controllers/viewed_controller.js", "")
-	if viewedController.Code != http.StatusOK || !strings.Contains(viewedController.Body.String(), "requestSubmit") || !strings.Contains(viewedController.Body.String(), "disclosure.open") {
+	if viewedController.Code != http.StatusOK || !strings.Contains(viewedController.Body.String(), "requestSubmit") || !strings.Contains(viewedController.Body.String(), "disclosure.open") || !strings.Contains(viewedController.Body.String(), "patchflow:viewed") {
 		t.Fatalf("viewed controller unavailable: %d", viewedController.Code)
+	}
+	planDisclosureController := perform(app, http.MethodGet, "/assets/controllers/plan_file_disclosure_controller.js", "")
+	if planDisclosureController.Code != http.StatusOK || !strings.Contains(planDisclosureController.Body.String(), "localStorage") || !strings.Contains(planDisclosureController.Body.String(), "patchflow:plan-file:") || !strings.Contains(planDisclosureController.Body.String(), "viewedChanged") {
+		t.Fatalf("plan disclosure controller unavailable: %d", planDisclosureController.Code)
 	}
 	imageController := perform(app, http.MethodGet, "/assets/controllers/image_viewer_controller.js", "")
 	if imageController.Code != http.StatusOK || !strings.Contains(imageController.Body.String(), "showModal") {
 		t.Fatalf("image viewer controller unavailable: %d", imageController.Code)
 	}
+	navigationController := perform(app, http.MethodGet, "/assets/controllers/navigation_controller.js", "")
+	for _, expected := range []string{"sessionStorage", "window.Turbo.visit", "fallbackValue", "ArrowLeft", "window.location.origin"} {
+		if navigationController.Code != http.StatusOK || !strings.Contains(navigationController.Body.String(), expected) {
+			t.Errorf("navigation controller missing %q", expected)
+		}
+	}
 	styles := perform(app, http.MethodGet, "/assets/styles/application.css", "")
-	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", "--color-comment-marker:", ".chapter-rail { position: sticky", ".callout, .review-question, .chapter-takeaway { width: 100%", ".discussion-panel:has(.thread-list:empty)", ".github-link", ".review-tabs", ".file-browser", "comment-submit-spin"} {
+	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", "--color-comment-marker:", ".chapter-rail { position: sticky", ".chapter-step-nav", ".callout, .review-question, .chapter-takeaway { width: 100%", ".discussion-panel:has(.thread-list:empty)", ".github-link", ".site-back", ".review-tabs", ".file-browser", "comment-submit-spin"} {
 		if !strings.Contains(styles.Body.String(), expected) {
 			t.Errorf("theme stylesheet missing %q", expected)
 		}
 	}
 
 	securityChapter := perform(app, http.MethodGet, reviewPath+"/steps/security", "")
-	if securityChapter.Code != http.StatusOK || !strings.Contains(securityChapter.Body.String(), "Decision gate") {
+	if securityChapter.Code != http.StatusOK || !strings.Contains(securityChapter.Body.String(), "Decision gate") || !strings.Contains(securityChapter.Body.String(), "aria-disabled=\"true\" title=\"This is the first step\"") {
 		t.Fatalf("critical review question is missing its decision gate: %d", securityChapter.Code)
 	}
 	generatedChapter := perform(app, http.MethodGet, reviewPath+"/steps/generated", "")
 	if generatedChapter.Code != http.StatusOK || !strings.Contains(generatedChapter.Body.String(), "<details class=\"evidence-disclosure\">") {
 		t.Fatalf("mechanical evidence is not collapsed: %d", generatedChapter.Code)
+	}
+	newReview := perform(app, http.MethodGet, basePath+"/reviews/new", "")
+	if newReview.Code != http.StatusOK || !strings.Contains(newReview.Body.String(), "data-navigation-fallback-value=\""+basePath+"\"") || strings.Contains(newReview.Body.String(), "aria-label=\"Create new review\"") {
+		t.Fatalf("new review navigation is not contextual: %d %s", newReview.Code, newReview.Body.String())
 	}
 }
 
@@ -316,7 +331,7 @@ func TestViewedProgressPersistsAcrossPlanAndFiles(t *testing.T) {
 		t.Fatalf("viewed update failed: %d %s", updated.Code, updated.Body.String())
 	}
 	chapter := perform(app, http.MethodGet, reviewPath+"/steps/domain", "")
-	if !strings.Contains(chapter.Body.String(), "name=\"path\" value=\""+filePath+"\"") || !strings.Contains(chapter.Body.String(), "type=\"checkbox\" checked") {
+	if !strings.Contains(chapter.Body.String(), "name=\"path\" value=\""+filePath+"\"") || !strings.Contains(chapter.Body.String(), "type=\"checkbox\" checked") || !strings.Contains(chapter.Body.String(), "data-controller=\"comment-thread plan-file-disclosure\"") || !strings.Contains(chapter.Body.String(), "data-plan-file-disclosure-target=\"content\" hidden") || !strings.Contains(chapter.Body.String(), "aria-expanded=\"false\"") {
 		t.Fatalf("plan does not show persisted viewed state: %s", chapter.Body.String())
 	}
 	frame := performFrame(app, reviewPath+"/files/"+filePath, fileFrameID(filePath))
@@ -327,6 +342,10 @@ func TestViewedProgressPersistsAcrossPlanAndFiles(t *testing.T) {
 	cleared := performTurbo(app, http.MethodPost, reviewPath+"/viewed", url.Values{"path": {filePath}, "viewed": {"false"}}.Encode())
 	if cleared.Code != http.StatusOK || strings.Contains(cleared.Body.String(), "type=\"checkbox\" checked") {
 		t.Fatalf("viewed clear failed: %d %s", cleared.Code, cleared.Body.String())
+	}
+	chapter = perform(app, http.MethodGet, reviewPath+"/steps/domain", "")
+	if strings.Contains(chapter.Body.String(), "data-plan-file-disclosure-target=\"content\" hidden") {
+		t.Fatalf("unviewed plan evidence was not expanded: %s", chapter.Body.String())
 	}
 	frame = performFrame(app, reviewPath+"/files/"+filePath, fileFrameID(filePath))
 	if !strings.Contains(frame.Body.String(), "data-file-disclosure open") {

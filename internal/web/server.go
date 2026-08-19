@@ -53,6 +53,10 @@ type App struct {
 type Page struct {
 	Title            string
 	BasePath         string
+	BackPath         string
+	BackLabel        string
+	ReviewHomePath   string
+	NewReviewPath    string
 	RepositoryName   string
 	GitHub           *GitHubLinkView
 	Notice           string
@@ -1428,6 +1432,7 @@ func (a *App) requireRepository(w http.ResponseWriter, r *http.Request) (*gitrep
 
 // render writes a complete HTML page and converts template failures to HTTP errors.
 func (a *App) render(w http.ResponseWriter, name string, page Page, status int) {
+	page = pageWithNavigation(name, page)
 	var buffer bytes.Buffer
 	if err := a.templates[name].ExecuteTemplate(&buffer, "layout", page); err != nil {
 		a.logger.Error("render page", "page", name, "error", err)
@@ -1437,6 +1442,30 @@ func (a *App) render(w http.ResponseWriter, name string, page Page, status int) 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = buffer.WriteTo(w)
+}
+
+// pageWithNavigation derives safe top-bar destinations from the rendered resource hierarchy.
+func pageWithNavigation(name string, page Page) Page {
+	if page.RepositoryName == "" || page.BasePath == "" {
+		return page
+	}
+	if name != "new" {
+		page.NewReviewPath = page.BasePath + "/reviews/new"
+	}
+	switch name {
+	case "home":
+		if page.Repository != nil {
+			page.BackPath, page.BackLabel = "/", "All repositories"
+		}
+	case "new", "overview":
+		page.BackPath, page.BackLabel = page.BasePath, "Repository overview"
+	case "chapter", "files":
+		if page.ReviewNavigation != nil {
+			page.BackPath, page.BackLabel = page.ReviewNavigation.ReviewPath, "Review overview"
+			page.ReviewHomePath = page.ReviewNavigation.ReviewPath
+		}
+	}
+	return page
 }
 
 // renderPartial writes a named fragment for progressive Turbo updates.
