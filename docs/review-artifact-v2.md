@@ -124,6 +124,14 @@ Validate with the canonical CLI:
 bin/patchflow validate --format json /path/to/review.yaml
 ```
 
+The canonical validator requires the review to be stored below the selected
+repository's `.patchflow/reviews/<review-id>/` directory. In addition to the
+schema and semantic invariants above, it resolves both recorded SHAs as local
+commit objects, compares `change.files` with the actual immutable Git diff,
+checks committed code-block paths and ranges, and reads every declared overview,
+diagram, and image asset. JSON failures contain an `errors` array with
+field/block locations suitable for an agent repair loop.
+
 The web application exposes `/reviews/<review-id>/blocks/<block-id>` as a stable
 reference path. An in-place copy control places that path on the clipboard. If
 opened directly, it renders the block's current chapter under the same URL and

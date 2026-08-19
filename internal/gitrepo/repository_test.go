@@ -49,6 +49,26 @@ func TestUserNameReadsEffectiveRepositoryConfiguration(t *testing.T) {
 	}
 }
 
+// TestDefaultBaseRefFindsConventionalBranches protects zero-configuration CLI creation.
+func TestDefaultBaseRefFindsConventionalBranches(t *testing.T) {
+	directory := testRepository(t)
+	repository, err := Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := repository.DefaultBaseRef()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base != "main" {
+		t.Fatalf("unexpected default base %q", base)
+	}
+	lines, err := repository.FileLineCount(repositoryMustResolve(t, repository, "HEAD"), "app/account.go")
+	if err != nil || lines != 2 {
+		t.Fatalf("unexpected committed line count %d: %v", lines, err)
+	}
+}
+
 // TestGitHubReferenceNormalizesRemotesAndRecognizesPullRequestRefs covers local link discovery.
 func TestGitHubReferenceNormalizesRemotesAndRecognizesPullRequestRefs(t *testing.T) {
 	for remote, expected := range map[string]string{
@@ -135,4 +155,14 @@ func writeTestFile(t *testing.T, root, relative, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// repositoryMustResolve resolves one fixture ref or fails the current test.
+func repositoryMustResolve(t *testing.T, repository *Repository, ref string) string {
+	t.Helper()
+	sha, err := repository.ResolveCommit(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sha
 }

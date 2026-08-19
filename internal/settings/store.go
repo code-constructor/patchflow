@@ -2,6 +2,7 @@
 package settings
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,12 @@ import (
 )
 
 const currentVersion = 1
+
+// RepositoryKey returns the stable opaque URL identifier for one canonical path.
+func RepositoryKey(repositoryPath string) string {
+	digest := sha256.Sum256([]byte(filepath.Clean(repositoryPath)))
+	return fmt.Sprintf("%x", digest[:8])
+}
 
 // Config is the versioned, extensible user configuration stored on disk.
 type Config struct {

@@ -13,6 +13,7 @@ import (
 	"github.com/traqx-ai/patchflow/internal/artifact"
 	"github.com/traqx-ai/patchflow/internal/gitrepo"
 	patchreview "github.com/traqx-ai/patchflow/internal/review"
+	patchsettings "github.com/traqx-ai/patchflow/internal/settings"
 	patchflowweb "github.com/traqx-ai/patchflow/internal/web"
 )
 
@@ -149,43 +150,84 @@ func parseBlockReference(reference string) (string, string, error) {
 
 // validate checks one review artifact and prints either human-readable or JSON output.
 func validate(arguments []string) int {
+	return validateTo(os.Stdout, os.Stderr, arguments)
+}
+
+// validateTo implements validate with injectable streams for deterministic agent output.
+func validateTo(stdout, stderr io.Writer, arguments []string) int {
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
+	flags.SetOutput(stderr)
 	format := flags.String("format", "text", "output format: text or json")
+	repositoryPath := flags.String("repository", "", "repository used for Git-backed review checks")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
 	if flags.NArg() != 1 || (*format != "text" && *format != "json") {
-		fmt.Fprintln(os.Stderr, "Usage: patchflow validate [--format text|json] PATH/TO/<review|comments>.yaml")
+		fmt.Fprintln(stderr, "Usage: patchflow validate [--repository PATH] [--format text|json] PATH/TO/<review|comments>.yaml")
 		return 2
 	}
 
 	if filepath.Base(flags.Arg(0)) == "comments.yaml" {
-		return validateDiscussion(flags.Arg(0), *format)
+		return validateDiscussionTo(stdout, stderr, flags.Arg(0), *format)
 	}
-	review, err := loadReview(flags.Arg(0))
+	reviewPath := flags.Arg(0)
+	review, err := loadReview(reviewPath)
+	if err == nil {
+		err = verifyStoredReview(reviewPath, *repositoryPath, review)
+	}
 	if err != nil {
 		if *format == "json" {
-			payload := map[string]any{"valid": false, "errors": []string{err.Error()}}
-			var validationErrors *artifact.ValidationErrors
-			if errors.As(err, &validationErrors) {
-				payload["errors"] = validationErrors.Errors
-			}
-			_ = json.NewEncoder(os.Stdout).Encode(payload)
+			payload := map[string]any{"valid": false, "errors": commandErrors(err)}
+			_ = json.NewEncoder(stdout).Encode(payload)
 		} else {
-			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(stderr, err)
 		}
 		return 1
 	}
 	if *format == "json" {
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"valid": true, "id": review.ID, "schema_version": review.SchemaVersion})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"valid": true, "id": review.ID, "schema_version": review.SchemaVersion})
 	} else {
-		fmt.Printf("Valid Patchflow review %s (schema v%d)\n", review.ID, review.SchemaVersion)
+		fmt.Fprintf(stdout, "Valid Patchflow review %s (schema v%d)\n", review.ID, review.SchemaVersion)
 	}
 	return 0
 }
 
-// validateDiscussion checks a standalone comments artifact and reports its thread count.
-func validateDiscussion(path, format string) int {
+// verifyStoredReview locates the artifact's repository and validates its real evidence.
+func verifyStoredReview(reviewPath, repositoryPath string, parsed *artifact.Review) error {
+	if repositoryPath == "" {
+		repositoryPath = repositoryFromReviewPath(reviewPath)
+	}
+	if repositoryPath == "" {
+		return fmt.Errorf("cannot infer the reviewed repository from %s; store the artifact below .patchflow/reviews or pass --repository", reviewPath)
+	}
+	repository, err := gitrepo.Open(repositoryPath)
+	if err != nil {
+		return err
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err != nil {
+		return err
+	}
+	stored, err := store.Find(parsed.ID)
+	if err != nil {
+		return fmt.Errorf("review %s is not registered below %s/.patchflow/reviews: %w", parsed.ID, repository.Root(), err)
+	}
+	absolutePath, err := filepath.Abs(reviewPath)
+	if err != nil {
+		return fmt.Errorf("resolve review path: %w", err)
+	}
+	realPath, err := filepath.EvalSymlinks(absolutePath)
+	if err != nil {
+		return fmt.Errorf("resolve review path: %w", err)
+	}
+	if realPath != stored.Path {
+		return fmt.Errorf("review path must be %s so Patchflow can discover it", stored.Path)
+	}
+	return (&patchreview.Verifier{Repository: repository, Store: store}).Verify(stored)
+}
+
+// validateDiscussionTo checks a standalone comments artifact and reports its thread count.
+func validateDiscussionTo(stdout, stderr io.Writer, path, format string) int {
 	discussion, err := loadDiscussion(path)
 	if err == nil {
 		var review *artifact.Review
@@ -201,16 +243,16 @@ func validateDiscussion(path, format string) int {
 			if errors.As(err, &validationErrors) {
 				payload["errors"] = validationErrors.Errors
 			}
-			_ = json.NewEncoder(os.Stdout).Encode(payload)
+			_ = json.NewEncoder(stdout).Encode(payload)
 		} else {
-			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(stderr, err)
 		}
 		return 1
 	}
 	if format == "json" {
-		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"valid": true, "review_id": discussion.ReviewID, "schema_version": discussion.SchemaVersion, "threads": len(discussion.Threads)})
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"valid": true, "review_id": discussion.ReviewID, "schema_version": discussion.SchemaVersion, "threads": len(discussion.Threads)})
 	} else {
-		fmt.Printf("Valid Patchflow comments for %s (schema v%d, %d threads)\n", discussion.ReviewID, discussion.SchemaVersion, len(discussion.Threads))
+		fmt.Fprintf(stdout, "Valid Patchflow comments for %s (schema v%d, %d threads)\n", discussion.ReviewID, discussion.SchemaVersion, len(discussion.Threads))
 	}
 	return 0
 }
@@ -247,19 +289,31 @@ func serve(arguments []string) int {
 
 // create resolves a committed Git comparison and persists its baseline review artifact.
 func create(arguments []string) int {
+	return createTo(os.Stdout, os.Stderr, arguments)
+}
+
+// createTo implements create with injectable output streams for deterministic agent contracts.
+func createTo(stdout, stderr io.Writer, arguments []string) int {
 	flags := flag.NewFlagSet("create", flag.ContinueOnError)
-	repositoryPath := flags.String("repository", "", "path to the reviewed Git repository")
-	baseRef := flags.String("base", "main", "base Git ref")
+	flags.SetOutput(stderr)
+	repositoryPath := flags.String("repository", ".", "path to the reviewed Git repository")
+	baseRef := flags.String("base", "", "base Git ref; detected when omitted")
 	targetRef := flags.String("target", "HEAD", "target Git ref")
+	settingsPath := flags.String("config", "", "path to the Patchflow user configuration")
 	format := flags.String("format", "text", "output format: text or json")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
 	if flags.NArg() != 0 || *repositoryPath == "" || (*format != "text" && *format != "json") {
-		fmt.Fprintln(os.Stderr, "Usage: patchflow create --repository PATH [--base main] [--target HEAD] [--format text|json]")
+		fmt.Fprintln(stderr, "Usage: patchflow create [--repository PATH] [--base REF] [--target REF] [--config PATH] [--format text|json]")
 		return 2
 	}
 	repository, err := gitrepo.Open(*repositoryPath)
+	if err == nil {
+		if *baseRef == "" {
+			*baseRef, err = repository.DefaultBaseRef()
+		}
+	}
 	if err == nil {
 		var store *patchreview.Store
 		store, err = patchreview.NewStore(repository.Root(), nil)
@@ -267,17 +321,58 @@ func create(arguments []string) int {
 			var stored *patchreview.Stored
 			stored, err = (&patchreview.Creator{Repository: repository, Store: store}).Create(*baseRef, *targetRef)
 			if err == nil {
+				err = (&patchreview.Verifier{Repository: repository, Store: store}).Verify(stored)
+			}
+			if err == nil {
+				warning := ""
+				settingsStore, settingsErr := patchsettings.NewStore(*settingsPath)
+				if settingsErr == nil {
+					settingsErr = settingsStore.Remember(repository.Root())
+				}
+				if settingsErr != nil {
+					warning = "review created, but Patchflow could not remember the repository: " + settingsErr.Error()
+				}
+				reference := "/repositories/" + patchsettings.RepositoryKey(repository.Root()) + "/reviews/" + stored.Review.ID
 				if *format == "json" {
-					_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"id": stored.Review.ID, "path": stored.Path})
+					payload := map[string]any{"created": true, "id": stored.Review.ID, "path": stored.Path, "reference": reference, "repository": repository.Root(), "base_ref": stored.Review.Source.BaseRef, "base_sha": stored.Review.Source.BaseSHA, "target_ref": stored.Review.Source.TargetRef, "target_sha": stored.Review.Source.TargetSHA}
+					if warning != "" {
+						payload["warnings"] = []string{warning}
+					}
+					_ = json.NewEncoder(stdout).Encode(payload)
 				} else {
-					fmt.Printf("Created Patchflow review %s at %s\n", stored.Review.ID, stored.Path)
+					fmt.Fprintf(stdout, "Created Patchflow review %s at %s\n", stored.Review.ID, stored.Path)
+					fmt.Fprintf(stdout, "Source: %s (%s) -> %s (%s)\n", stored.Review.Source.BaseRef, stored.Review.Source.BaseSHA, stored.Review.Source.TargetRef, stored.Review.Source.TargetSHA)
+					fmt.Fprintf(stdout, "Open in Patchflow: %s\n", reference)
+					if warning != "" {
+						fmt.Fprintln(stderr, "Warning:", warning)
+					}
 				}
 				return 0
 			}
 		}
 	}
-	fmt.Fprintln(os.Stderr, err)
+	if *format == "json" {
+		_ = json.NewEncoder(stdout).Encode(map[string]any{"created": false, "errors": commandErrors(err)})
+	} else {
+		fmt.Fprintln(stderr, err)
+	}
 	return 1
+}
+
+// commandErrors unwraps known multi-error contracts for machine-readable CLI output.
+func commandErrors(err error) []string {
+	if err == nil {
+		return nil
+	}
+	var artifactErrors *artifact.ValidationErrors
+	if errors.As(err, &artifactErrors) {
+		return artifactErrors.Errors
+	}
+	var verificationErrors *patchreview.VerificationErrors
+	if errors.As(err, &verificationErrors) {
+		return verificationErrors.Errors
+	}
+	return []string{err.Error()}
 }
 
 // loadReview reads and validates a review artifact from disk.

@@ -2,12 +2,63 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestCreateAndValidateProvideAnAgentReadyReviewContract covers discovery, registration, and Git evidence.
+func TestCreateAndValidateProvideAnAgentReadyReviewContract(t *testing.T) {
+	repository := commandRepository(t)
+	configPath := filepath.Join(t.TempDir(), "patchflow", "config.json")
+	var stdout, stderr bytes.Buffer
+	exitCode := createTo(&stdout, &stderr, []string{"--repository", repository, "--config", configPath, "--format", "json"})
+	if exitCode != 0 {
+		t.Fatalf("create returned %d: %s", exitCode, stderr.String())
+	}
+	var created struct {
+		Created   bool   `json:"created"`
+		ID        string `json:"id"`
+		Path      string `json:"path"`
+		Reference string `json:"reference"`
+		BaseRef   string `json:"base_ref"`
+		BaseSHA   string `json:"base_sha"`
+		TargetSHA string `json:"target_sha"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if !created.Created || created.ID == "" || created.BaseRef != "main" || len(created.BaseSHA) != 40 || len(created.TargetSHA) != 40 || !strings.Contains(created.Reference, "/repositories/") {
+		t.Fatalf("unexpected create payload: %#v", created)
+	}
+	settingsSource, err := os.ReadFile(configPath)
+	if err != nil || !strings.Contains(string(settingsSource), repository) {
+		t.Fatalf("repository was not registered: %v %s", err, settingsSource)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = validateTo(&stdout, &stderr, []string{"--format", "json", created.Path})
+	if exitCode != 0 || !strings.Contains(stdout.String(), `"valid":true`) {
+		t.Fatalf("validate returned %d: %s %s", exitCode, stderr.String(), stdout.String())
+	}
+	source, err := os.ReadFile(created.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := strings.Replace(string(source), created.TargetSHA, strings.Repeat("f", 40), 1)
+	if err := os.WriteFile(created.Path, []byte(broken), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = validateTo(&stdout, &stderr, []string{"--format", "json", created.Path})
+	if exitCode != 1 || !strings.Contains(stdout.String(), "source.target_sha") || !strings.Contains(stdout.String(), "not an available commit") {
+		t.Fatalf("broken commit validation returned %d: %s %s", exitCode, stderr.String(), stdout.String())
+	}
+}
 
 // TestParseBlockReferenceAcceptsCopiedPaths protects the browser-to-CLI contract.
 func TestParseBlockReferenceAcceptsCopiedPaths(t *testing.T) {
@@ -110,5 +161,43 @@ func TestCommentCommandsCreateListReplyAndShow(t *testing.T) {
 	exitCode = resolveTo(&stdout, &stderr, []string{"--repository", repository, "/reviews/" + reviewID + "/threads/" + thread.ID})
 	if exitCode != 0 || !strings.Contains(stdout.String(), "resolved: true") {
 		t.Fatalf("resolve returned %d: %s %s", exitCode, stderr.String(), stdout.String())
+	}
+}
+
+// commandRepository creates a committed feature comparison for CLI tests.
+func commandRepository(t *testing.T) string {
+	t.Helper()
+	repository := t.TempDir()
+	commandGit(t, repository, "init", "-b", "main")
+	commandGit(t, repository, "config", "user.email", "test@example.test")
+	commandGit(t, repository, "config", "user.name", "Patchflow Test")
+	commandWrite(t, repository, "main.go", "package main\n")
+	commandGit(t, repository, "add", ".")
+	commandGit(t, repository, "commit", "-m", "base")
+	commandGit(t, repository, "checkout", "-b", "feature")
+	commandWrite(t, repository, "main.go", "package main\n\nfunc main() {}\n")
+	commandGit(t, repository, "add", ".")
+	commandGit(t, repository, "commit", "-m", "feature")
+	return repository
+}
+
+// commandGit executes one Git fixture operation or fails the current test.
+func commandGit(t *testing.T, repository string, arguments ...string) {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", repository}, arguments...)...)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", arguments, err, output)
+	}
+}
+
+// commandWrite creates one source file inside a CLI fixture repository.
+func commandWrite(t *testing.T, repository, relative, content string) {
+	t.Helper()
+	path := filepath.Join(repository, relative)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

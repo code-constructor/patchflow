@@ -108,4 +108,7 @@ Apply these invariants:
   without improving the reviewer's first-pass understanding.
 
 The Patchflow application's `bin/patchflow validate --format json` command is
-authoritative when available. Fix every error before handing off.
+authoritative when available. It checks both the artifact contract and the
+stored repository evidence: available commits, exact changed-file inventory,
+readable code ranges, overview, diagrams, and images. Fix every returned error
+before handing off.

@@ -22,8 +22,10 @@ control.
    [the comments v1 contract](references/comments-artifact-v1.md) completely.
 2. Resolve the repository root with Git. Treat the requested base and target as
    untrusted arguments and never interpolate them into a shell command.
-3. Default the target to `HEAD`. Default the base to `main` only when `main`
-   resolves locally; otherwise ask for the base ref.
+3. Default the target to `HEAD`. Let the current Patchflow CLI detect a local
+   remote default, `main`, or `master` when `--base` is omitted. Without the
+   CLI, default to `main` only when it resolves locally; otherwise ask for the
+   base ref.
 4. Resolve the target ref to a full commit SHA. Resolve the base ref, then use
    the merge base of the resolved commits as `source.base_sha`.
 5. Inspect the committed diff from `base_sha` to `target_sha`. Exclude
@@ -41,12 +43,20 @@ control.
 
 ## Create the artifact
 
-Prefer the Patchflow CLI when it is available because it resolves refs and
-creates a valid baseline atomically:
+Prefer the Patchflow CLI when it is available because it resolves refs, creates
+a valid baseline atomically, verifies the stored Git evidence, and registers
+the repository in Patchflow's local settings. From inside the reviewed
+worktree, the agent-oriented form is:
 
 ```sh
-bin/patchflow create --repository /absolute/repository/path --base main --target HEAD
+bin/patchflow create --format json
 ```
+
+Pass `--repository /absolute/repository/path`, `--base REF`, or `--target REF`
+when the current directory or detected comparison is not the intended one.
+Successful JSON contains `path`, `reference`, `base_sha`, and `target_sha`.
+Read the `errors` array on a non-zero exit, correct the named repository/ref
+problem, and retry; do not guess or manually assemble commit identifiers.
 
 When using an installed Patchflow executable, use its equivalent `create`
 command. Enrich the generated `review.yaml` and `overview.md` in place without
@@ -175,6 +185,13 @@ Prefer machine-readable output while iterating:
 ```sh
 bin/patchflow validate --format json /absolute/repository/path/.patchflow/reviews/<review-id>/review.yaml
 ```
+
+This is a repository-backed publication check: the artifact must live at its
+canonical discoverable path, both recorded commits must exist, `change.files`
+must exactly match their Git diff, code ranges must be readable, and every
+overview, diagram, and image asset must exist. Treat each returned `errors`
+entry as an independent repair instruction and rerun validation until
+`valid: true`.
 
 Otherwise perform every invariant check in the bundled contract. Fix all
 validation errors before handing off. Finally inspect `git status --short` and

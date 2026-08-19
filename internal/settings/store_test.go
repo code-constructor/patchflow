@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// TestRepositoryKeyIsStableAndOpaque protects repository-scoped URL identity.
+func TestRepositoryKeyIsStableAndOpaque(t *testing.T) {
+	first := RepositoryKey("/workspace/example")
+	second := RepositoryKey("/workspace/example/../example")
+	if first != second || len(first) != 16 || strings.Contains(first, "example") {
+		t.Fatalf("unexpected repository key %q %q", first, second)
+	}
+}
+
 // TestDefaultPathHonorsOverride verifies Docker and test environments can relocate settings.
 func TestDefaultPathHonorsOverride(t *testing.T) {
 	expected := filepath.Join(t.TempDir(), "patchflow.json")

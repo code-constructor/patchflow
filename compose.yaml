@@ -11,6 +11,8 @@ services:
     image: patchflow:dev
     init: true
     restart: unless-stopped
+    environment:
+      PATCHFLOW_CONFIG_PATH: ${PATCHFLOW_DOCKER_CONFIG_PATH:-/workspace/.patchflow/config.json}
     command: ["patchflow", "serve", "--config", "${PATCHFLOW_DOCKER_CONFIG_PATH:-/workspace/.patchflow/config.json}", "--addr", "0.0.0.0:3000"]
     volumes:
       - ${HOME}/Projects:/workspace

@@ -119,7 +119,8 @@ The initial vertical slice focuses on:
   addressable chapter takeaways;
 - displaying syntax-highlighted split and unified diffs in the planned order;
 - streaming every changed file down one continuous, tree-addressable page and
-  lazy-loading its diff near the viewport;
+  lazy-loading its diff near the viewport, with a collapsible file tree for
+  full-width code review;
 - persisting personal Viewed progress in the local user configuration, with
   collapsed viewed files in Files changed and non-collapsing status in the plan;
 - collapsing generated or mechanical evidence without removing it from scope;
@@ -174,6 +175,14 @@ docker compose up --build
 
 Patchflow is then available at <http://patchflow.localhost>. No host port is
 claimed by the application container; Traefik discovers it from Compose labels.
+The container also exports the server's config path to CLI subprocesses. A
+Coding Agent can therefore create and register a review without opening the
+repository picker or assembling SHAs, for example:
+
+```sh
+docker compose exec -w /workspace/example app \
+  patchflow create --format json
+```
 
 The host's `$HOME/Projects` directory is mounted at `/workspace`, allowing
 Patchflow to review local projects. Herdr worktrees from `$HOME/.herdr/worktrees`
@@ -291,21 +300,38 @@ the current browser tab. A Viewed toggle collapses that file in the classic
 view while the guided plan keeps its code visible and shows only the shared
 completion state. The state survives browsers and restarts in the local config.
 
-The same workflow is available from the command line:
+The same workflow is available from the command line. Run it inside the target
+repository and Patchflow detects the local default branch, uses `HEAD` as the
+target, resolves both immutable commits, creates a baseline artifact, validates
+its Git evidence, and remembers the repository for the local UI:
 
 ```sh
-bin/patchflow create \
-  --repository /absolute/path/to/repository \
-  --base main \
-  --target HEAD
+bin/patchflow create --format json
 ```
 
-Validate an existing artifact with:
+Use `--repository`, `--base`, or `--target` when the command runs outside the
+reviewed worktree or automatic base discovery is not the intended comparison.
+`--config` selects the same settings file as a separately running Patchflow
+server. Successful JSON output includes the artifact path, browser route,
+repository path, refs, and full base/target SHAs. Failures return a non-zero
+status and an `errors` array intended for Coding Agents.
+
+After an agent curates `review.yaml`, validate the complete stored review with:
 
 ```sh
 bin/patchflow validate \
+  --format json \
   /absolute/path/to/repository/.patchflow/reviews/<review-id>/review.yaml
 ```
+
+Validation is repository-backed, not only syntactic. It checks the schema and
+semantic IDs, proves that both recorded SHAs are available commits, compares
+the complete changed-file inventory with Git, verifies code-block paths and
+line ranges, and confirms that `overview.md`, Mermaid sources, and raster image
+assets are readable. The repository is inferred from the canonical
+`.patchflow/reviews` path; `--repository PATH` is available for explicit
+diagnostics. A review outside that canonical directory is rejected because the
+UI could not discover it.
 
 The standalone discussion contract is validated the same way:
 
