@@ -51,6 +51,9 @@ The supported blocks are:
 - `question`: a static unresolved question in `body`. Discussion replies live
   in `comments.yaml`, not inside the narrative block.
 - `diagram`: a Mermaid source `path` below the artifact's `diagrams/` directory.
+- `image`: a PNG, JPEG, GIF, or WebP `path` below `assets/`, required accessible
+  `alt` text, and an optional Markdown `caption`. SVG is intentionally excluded
+  because review assets are untrusted local input.
 - `takeaway`: Markdown `body` that closes the chapter with its intended mental
   model. Place it last unless later evidence deliberately follows it.
 
@@ -91,6 +94,11 @@ steps:
       - id: activation-question
         type: question
         body: Is automatic reactivation intended?
+      - id: activation-result
+        type: image
+        path: assets/activation-result.png
+        alt: Account page with the new active status
+        caption: The status appears next to the account name after activation.
       - id: activation-takeaway
         type: takeaway
         body: The model remains the single owner of account activation.
@@ -106,6 +114,7 @@ In addition to JSON Schema validation:
 - code excerpts contain ordered positive line numbers and no more than 500
   lines;
 - diagram paths begin with `diagrams/`;
+- image paths begin with `assets/` and use PNG, JPEG, GIF, or WebP;
 - all paths are normalized and relative, contain no traversal or backslashes,
   and repository paths stay outside `.patchflow`.
 

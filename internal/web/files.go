@@ -19,25 +19,38 @@ type ReviewNavigationView struct {
 	FileCount                                                        int
 }
 
-// FilesView contains the complete changed-file tree and optional selected diff.
+// FilesView contains the complete changed-file tree and lazy continuous diff stream.
 type FilesView struct {
 	BasePath, ReviewID, Title, Summary, FileLabel string
 	FileCount                                     int
 	Tree                                          []*FileTreeNode
-	Selected                                      *SelectedFileView
+	Items                                         []FileStreamItem
+}
+
+// FileStreamItem is one stable lazy-loading location in the continuous file review.
+type FileStreamItem struct {
+	Path, URL, DOMID, FrameID, StatusLabel string
+	Active, Viewed, Eager                  bool
+}
+
+// FileFrameView supplies one exact changed-file fragment to a lazy Turbo Frame.
+type FileFrameView struct {
+	FrameID string
+	File    *SelectedFileView
 }
 
 // SelectedFileView combines one changed-file record with its rendered patch.
 type SelectedFileView struct {
 	Path, PreviousPath, Status, StatusLabel string
 	Diff                                    BlockView
+	Viewed                                  bool
 }
 
 // FileTreeNode represents a directory or changed path in the review file tree.
 type FileTreeNode struct {
-	Name, Path, URL, Status, StatusCode string
-	Directory, Active                   bool
-	Children                            []*FileTreeNode
+	Name, Path, URL, Status, StatusCode, DOMID, ViewedKey string
+	Directory, Active, Viewed                             bool
+	Children                                              []*FileTreeNode
 }
 
 // files renders the classic changed-file view for one immutable review comparison.
@@ -61,7 +74,32 @@ func (a *App) files(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if selectedPath == "" && len(stored.Review.Change.Files) > 0 {
+		selectedPath = stored.Review.Change.Files[0].Path
+	}
+	if selectedPath != "" {
+		if _, found := findChangedFile(stored.Review.Change.Files, selectedPath); !found {
+			http.NotFound(w, r)
+			return
+		}
+	}
 	basePath := requestRepositoryBasePath(r, repository)
+	viewed, progressErr := a.settings.ViewedFiles(repository.Root(), stored.Review.ID, stored.Review.Source.TargetSHA)
+	if progressErr != nil {
+		viewed = map[string]bool{}
+	}
+	if selectedPath != "" {
+		frameID := fileFrameID(selectedPath)
+		if r.Header.Get("Turbo-Frame") == frameID {
+			file, _ := findChangedFile(stored.Review.Change.Files, selectedPath)
+			selected, alert := buildSelectedFileView(repository, store, stored, basePath, file, viewed[file.Path], "")
+			if alert != "" {
+				selected.Diff.Error = alert
+			}
+			a.renderPartial(w, "files", "file_frame", FileFrameView{FrameID: frameID, File: selected}, http.StatusOK)
+			return
+		}
+	}
 	view := FilesView{
 		BasePath:  basePath,
 		ReviewID:  reviewID,
@@ -69,16 +107,18 @@ func (a *App) files(w http.ResponseWriter, r *http.Request) {
 		Summary:   stored.Review.Change.Summary,
 		FileCount: len(stored.Review.Change.Files),
 		FileLabel: changedFilesLabel(len(stored.Review.Change.Files)),
-		Tree:      buildFileTree(basePath, stored, selectedPath),
+		Tree:      buildFileTree(basePath, stored, selectedPath, viewed),
 	}
 	alert := r.URL.Query().Get("alert")
-	if selectedPath != "" {
-		selected, found := findChangedFile(stored.Review.Change.Files, selectedPath)
-		if !found {
-			http.NotFound(w, r)
-			return
-		}
-		view.Selected, alert = buildSelectedFileView(repository, store, stored, basePath, selected, alert)
+	if progressErr != nil {
+		alert = progressErr.Error()
+	}
+	for index, file := range stored.Review.Change.Files {
+		view.Items = append(view.Items, FileStreamItem{
+			Path: file.Path, URL: reviewFilePath(basePath, stored.Review.ID, file.Path), DOMID: fileDOMID(file.Path),
+			FrameID: fileFrameID(file.Path), StatusLabel: humanize(file.Status), Active: file.Path == selectedPath,
+			Viewed: viewed[file.Path], Eager: index == 0 || file.Path == selectedPath,
+		})
 	}
 	a.render(w, "files", Page{
 		Title:            "Files changed · " + view.Title + " · Patchflow",
@@ -101,7 +141,7 @@ func changedFilesLabel(count int) string {
 }
 
 // buildSelectedFileView resolves one exact-SHA patch and any discussion attached in the plan.
-func buildSelectedFileView(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, basePath string, file artifact.ChangedFile, alert string) (*SelectedFileView, string) {
+func buildSelectedFileView(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, basePath string, file artifact.ChangedFile, viewed bool, alert string) (*SelectedFileView, string) {
 	block, commentable := reviewDiffBlock(stored.Review, file.Path)
 	blockIDs := reviewBlockIDsForPath(stored.Review, file.Path)
 	if !commentable {
@@ -113,6 +153,7 @@ func buildSelectedFileView(repository *gitrepo.Repository, store *patchreview.St
 	diff.ReferencePath = reviewFilePath(basePath, stored.Review.ID, file.Path)
 	diff.ReferenceLabel = "file " + file.Path
 	diff.Label = file.Path
+	diff.Viewed = viewedControl(basePath, stored, file.Path, viewed)
 	diff.Commentable = commentable && stored.Review.SchemaVersion == 2
 	if len(blockIDs) > 0 && stored.Review.SchemaVersion == 2 {
 		discussion, err := store.ReadDiscussion(stored)
@@ -130,7 +171,7 @@ func buildSelectedFileView(repository *gitrepo.Repository, store *patchreview.St
 			diff.ThreadAction = basePath + "/reviews/" + stored.Review.ID + "/blocks/" + block.ID + "/threads"
 		}
 	}
-	return &SelectedFileView{Path: file.Path, PreviousPath: file.PreviousPath, Status: file.Status, StatusLabel: humanize(file.Status), Diff: diff}, alert
+	return &SelectedFileView{Path: file.Path, PreviousPath: file.PreviousPath, Status: file.Status, StatusLabel: humanize(file.Status), Diff: diff, Viewed: viewed}, alert
 }
 
 // reviewNavigationView creates stable tab destinations for one stored review.
@@ -223,7 +264,7 @@ func findChangedFile(files []artifact.ChangedFile, filePath string) (artifact.Ch
 }
 
 // buildFileTree groups changed paths into sorted directory nodes.
-func buildFileTree(basePath string, stored *patchreview.Stored, activePath string) []*FileTreeNode {
+func buildFileTree(basePath string, stored *patchreview.Stored, activePath string, viewed map[string]bool) []*FileTreeNode {
 	root := &FileTreeNode{Directory: true}
 	for _, file := range stored.Review.Change.Files {
 		parts := strings.Split(file.Path, "/")
@@ -235,6 +276,7 @@ func buildFileTree(basePath string, stored *patchreview.Stored, activePath strin
 				parent.Children = append(parent.Children, &FileTreeNode{
 					Name: name, Path: file.Path, URL: reviewFilePath(basePath, stored.Review.ID, file.Path),
 					Status: file.Status, StatusCode: fileStatusCode(file.Status), Active: file.Path == activePath,
+					DOMID: fileDOMID(file.Path), ViewedKey: fileProgressKey(file.Path), Viewed: viewed[file.Path],
 				})
 				continue
 			}
@@ -290,3 +332,9 @@ func fileViewID(filePath string) string {
 	digest := sha256.Sum256([]byte(filePath))
 	return fmt.Sprintf("file-%x", digest[:8])
 }
+
+// fileDOMID creates the stable scroll destination for one changed path.
+func fileDOMID(filePath string) string { return fileViewID(filePath) + "-change" }
+
+// fileFrameID creates the stable Turbo Frame identity for one changed path.
+func fileFrameID(filePath string) string { return fileViewID(filePath) + "-frame" }

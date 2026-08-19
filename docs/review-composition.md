@@ -105,7 +105,9 @@ Build chapters as claim-and-evidence sequences:
    answer.
 6. Use `diagram` when relationships, ownership, or sequence are materially
    clearer visually than in prose.
-7. Close with `takeaway` when the reviewer needs an explicit mental model before
+7. Use `image` when a screenshot or rendered result is itself review evidence;
+   its caption should direct attention rather than merely repeat its alt text.
+8. Close with `takeaway` when the reviewer needs an explicit mental model before
    moving to the next chapter.
 
 Not every sequence needs every block type. Avoid decorative diagrams, repeated

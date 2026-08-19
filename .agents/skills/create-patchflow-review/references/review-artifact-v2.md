@@ -65,11 +65,17 @@ steps:
         type: diagram
         path: diagrams/<name>.mmd
       - id: <globally unique block-id>
+        type: image
+        path: assets/<name>.png # PNG, JPEG, GIF, or WebP
+        alt: <accessible description of the image>
+        caption: <optional Markdown explaining what to inspect>
+      - id: <globally unique block-id>
         type: takeaway
         body: <understanding the reviewer should leave with>
 ```
 
-Create `overview.md` beside `review.yaml`. Put Mermaid files below `diagrams/`.
+Create `overview.md` beside `review.yaml`. Put Mermaid files below `diagrams/`
+and raster review images below `assets/`.
 The v2 narrative has no `annotations`, replies, or `decisions` fields. Persisted
 discussion uses the separate `comments.yaml` contract; never add its fields to
 `review.yaml`.
@@ -91,7 +97,9 @@ Apply these invariants:
 - Code blocks may reference unchanged files when necessary for context.
 - Use normalized relative paths with `/` separators. Reject absolute paths,
   `..`, backslashes, and repository paths below `.patchflow`. Keep diagram paths
-  below the artifact's `diagrams/` directory.
+  below the artifact's `diagrams/` directory and image paths below `assets/`.
+- Images require useful `alt` text and must be PNG, JPEG, GIF, or WebP. Do not
+  use SVG for untrusted review assets.
 - Keep line ranges ordered. Limit code excerpts to 500 lines.
 - Use no unknown fields. Set new reviews to `draft`.
 - Use `review_question` and `attention` when they sharpen a chapter's purpose.

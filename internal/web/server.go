@@ -28,6 +28,7 @@ import (
 var embedded embed.FS
 
 const repositoryCookie = "patchflow_repository"
+const maxReviewImageBytes int64 = 20 << 20
 
 type repositoryScopeKey struct{}
 
@@ -128,6 +129,9 @@ type BlockView struct {
 	Focus           string
 	Highlights      string
 	DiagramMarkdown string
+	Alt             string
+	Caption         string
+	ImageURL        string
 	ReferencePath   string
 	ReferenceLabel  string
 	Label           string
@@ -141,6 +145,20 @@ type BlockView struct {
 	Commentable     bool
 	Focused         bool
 	Collapsed       bool
+	Viewed          *ViewedControlView
+}
+
+// ViewedControlView describes one shared personal progress toggle for a changed path.
+type ViewedControlView struct {
+	Key, Path, Action string
+	Viewed            bool
+}
+
+// TurboViewedUpdateView updates every visible toggle and status marker for one path.
+type TurboViewedUpdateView struct {
+	Control          ViewedControlView
+	ControlTargets   string
+	IndicatorTargets string
 }
 
 // CodeLine is one numbered source line with trusted server-generated highlighting.
@@ -317,8 +335,12 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.editComment(w, r)
 	case r.Method == http.MethodPost && matchActionPath(r.URL.Path, "threads", "resolution"):
 		a.updateThreadResolution(w, r)
+	case r.Method == http.MethodPost && matchViewedPath(r.URL.Path):
+		a.updateViewed(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/comments/"):
 		a.comment(w, r)
+	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/images/"):
+		a.reviewImage(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/threads/"):
 		a.thread(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/blocks/"):
@@ -548,8 +570,16 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 	if reviewerErr != nil {
 		reviewerName = "Reviewer"
 	}
+	viewed, progressErr := a.settings.ViewedFiles(repository.Root(), stored.Review.ID, stored.Review.Source.TargetSHA)
+	if progressErr != nil {
+		alert = progressErr.Error()
+		viewed = map[string]bool{}
+	}
 	for _, block := range blocks {
 		view := buildBlock(repository, store, stored, files, block)
+		if block.Type == "image" {
+			view.ImageURL = basePath + "/reviews/" + stored.Review.ID + "/images/" + block.ID
+		}
 		view.ReferencePath = basePath + "/reviews/" + stored.Review.ID + "/blocks/" + block.ID
 		view.ReferenceLabel = "block " + block.ID
 		view.Label = blockLabel(block)
@@ -558,9 +588,137 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 		view.ThreadAction = view.ReferencePath + "/threads"
 		view.ReviewerName = reviewerName
 		view.Threads, view.ThreadAnchors = buildThreadViews(basePath, stored.Review.ID, block.ID, reviewerName, discussion, focusedThreadID, focusedCommentID)
+		if (block.Type == "diff" || block.Type == "code") && block.Path != "" {
+			view.Viewed = viewedControl(basePath, stored, block.Path, viewed[block.Path])
+		}
 		chapter.Blocks = append(chapter.Blocks, view)
 	}
 	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", BasePath: basePath, RepositoryName: repository.Name(), GitHub: githubLinkView(repository, stored.Review.Source.TargetRef), ReviewNavigation: reviewNavigationView(basePath, stored, "plan"), Chapter: &chapter, Notice: notice, Alert: alert}, http.StatusOK)
+}
+
+// reviewImage serves only a declared raster block asset from its safe review directory.
+func (a *App) reviewImage(w http.ResponseWriter, r *http.Request) {
+	repository, ok := a.requireRepository(w, r)
+	if !ok {
+		return
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "reviews" || parts[2] != "images" {
+		http.NotFound(w, r)
+		return
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	location, err := store.FindBlock(parts[1], parts[3])
+	if err != nil || location.Block.Type != "image" {
+		http.NotFound(w, r)
+		return
+	}
+	size, err := store.AssetSize(location.Stored, location.Block.Path)
+	if err != nil || size > maxReviewImageBytes {
+		http.NotFound(w, r)
+		return
+	}
+	content, err := store.ReadAssetBytes(location.Stored, location.Block.Path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	contentType := http.DetectContentType(content)
+	if !allowedReviewImageType(contentType) {
+		http.Error(w, "Unsupported review image type", http.StatusUnsupportedMediaType)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
+}
+
+// allowedReviewImageType restricts inline assets to inert browser raster formats.
+func allowedReviewImageType(contentType string) bool {
+	return contentType == "image/png" || contentType == "image/jpeg" || contentType == "image/gif" || contentType == "image/webp"
+}
+
+// updateViewed persists one personal file-review progress toggle and answers inline.
+func (a *App) updateViewed(w http.ResponseWriter, r *http.Request) {
+	if !validMutationOrigin(r) {
+		http.Error(w, "Cross-origin form submission rejected", http.StatusForbidden)
+		return
+	}
+	repository, ok := a.requireRepository(w, r)
+	if !ok {
+		return
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 3 || parts[0] != "reviews" || parts[2] != "viewed" {
+		http.NotFound(w, r)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	stored, err := store.Find(parts[1])
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	filePath := r.FormValue("path")
+	if !reviewEvidencePath(stored.Review, filePath) {
+		http.Error(w, "Viewed path is not review evidence", http.StatusUnprocessableEntity)
+		return
+	}
+	viewed := r.FormValue("viewed") == "true"
+	if err := a.settings.SetFileViewed(repository.Root(), stored.Review.ID, stored.Review.Source.TargetSHA, filePath, viewed); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	basePath := requestRepositoryBasePath(r, repository)
+	control := viewedControl(basePath, stored, filePath, viewed)
+	if wantsTurboStream(r) {
+		a.renderTurboStream(w, "turbo_viewed_update", TurboViewedUpdateView{
+			Control: *control, ControlTargets: "[data-viewed-key=\"" + control.Key + "\"]",
+			IndicatorTargets: "[data-viewed-indicator-key=\"" + control.Key + "\"]",
+		})
+		return
+	}
+	redirect(w, r, basePath+"/reviews/"+stored.Review.ID, "notice", "Review progress saved.")
+}
+
+// reviewEvidencePath accepts changed files and unchanged context declared by code blocks.
+func reviewEvidencePath(review *artifact.Review, filePath string) bool {
+	if _, found := findChangedFile(review.Change.Files, filePath); found {
+		return true
+	}
+	for _, step := range review.Steps {
+		for _, block := range step.Blocks {
+			if block.Type == "code" && block.Path == filePath {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// viewedControl builds the shared control identity for plan and file views.
+func viewedControl(basePath string, stored *patchreview.Stored, filePath string, viewed bool) *ViewedControlView {
+	return &ViewedControlView{Key: fileProgressKey(filePath), Path: filePath, Action: basePath + "/reviews/" + stored.Review.ID + "/viewed", Viewed: viewed}
+}
+
+// fileProgressKey creates a CSS-safe identity shared by all views of a path.
+func fileProgressKey(filePath string) string {
+	digest := sha256.Sum256([]byte(filePath))
+	return fmt.Sprintf("viewed-%x", digest[:8])
 }
 
 // githubLinkView derives a review destination without making a hosted-service request.
@@ -842,7 +1000,7 @@ func (a *App) updateThreadResolution(w http.ResponseWriter, r *http.Request) {
 
 // buildBlock joins a declarative artifact block with evidence from its recorded commits.
 func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, files map[string]artifact.ChangedFile, block artifact.Block) BlockView {
-	view := BlockView{ID: block.ID, Type: block.Type, Body: block.Body, Kind: block.Kind, Path: block.Path, View: defaultString(block.View, "split"), SourceSide: block.Source, StartLine: block.StartLine, EndLine: block.EndLine, Collapsed: block.Collapsed}
+	view := BlockView{ID: block.ID, Type: block.Type, Body: block.Body, Kind: block.Kind, Path: block.Path, View: defaultString(block.View, "split"), SourceSide: block.Source, StartLine: block.StartLine, EndLine: block.EndLine, Collapsed: block.Collapsed, Alt: block.Alt, Caption: block.Caption}
 	switch block.Type {
 	case "diff":
 		file := files[block.Path]
@@ -880,6 +1038,13 @@ func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored
 			view.Error = err.Error()
 		} else {
 			view.DiagramMarkdown = "```mermaid\n" + source + "\n```"
+		}
+	case "image":
+		size, err := store.AssetSize(stored, block.Path)
+		if err != nil {
+			view.Error = err.Error()
+		} else if size > maxReviewImageBytes {
+			view.Error = "Review image exceeds the 20 MB display limit"
 		}
 	}
 	return view
@@ -981,6 +1146,8 @@ func blockLabel(block artifact.Block) string {
 		return block.Path
 	case "diagram":
 		return "Diagram · " + strings.TrimPrefix(block.Path, "diagrams/")
+	case "image":
+		return "Image · " + strings.TrimPrefix(block.Path, "assets/")
 	case "callout":
 		return humanize(block.Kind)
 	case "question":
@@ -1277,6 +1444,12 @@ func matchPath(path, prefix, separator string) bool {
 func matchActionPath(path, resource, action string) bool {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	return len(parts) == 5 && parts[0] == "reviews" && parts[2] == resource && parts[4] == action
+}
+
+// matchViewedPath recognizes the compact personal-progress mutation route.
+func matchViewedPath(requestPath string) bool {
+	parts := strings.Split(strings.Trim(requestPath, "/"), "/")
+	return len(parts) == 3 && parts[0] == "reviews" && parts[1] != "" && parts[2] == "viewed"
 }
 
 // parseOptionalLine accepts an absent line or one positive decimal line number.

@@ -105,3 +105,47 @@ func TestStoreSerializesConcurrentWriters(t *testing.T) {
 		t.Fatalf("concurrent settings writes lost repositories: %d %v", len(repositories), err)
 	}
 }
+
+// TestStorePersistsViewedFilesByImmutableReview verifies shared progress across browser sessions.
+func TestStorePersistsViewedFilesByImmutableReview(t *testing.T) {
+	settingsPath := filepath.Join(t.TempDir(), "config.json")
+	repository := t.TempDir()
+	store, err := NewStore(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetFileViewed(repository, "review-1", "target-a", "cmd/patchflow/main.go", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetFileViewed(repository, "review-1", "target-a", "README.md", true); err != nil {
+		t.Fatal(err)
+	}
+	reopened, _ := NewStore(settingsPath)
+	viewed, err := reopened.ViewedFiles(repository, "review-1", "target-a")
+	if err != nil || !viewed["cmd/patchflow/main.go"] || !viewed["README.md"] || len(viewed) != 2 {
+		t.Fatalf("unexpected viewed files: %#v %v", viewed, err)
+	}
+	if err := reopened.SetFileViewed(repository, "review-1", "target-a", "README.md", false); err != nil {
+		t.Fatal(err)
+	}
+	viewed, _ = reopened.ViewedFiles(repository, "review-1", "target-a")
+	if viewed["README.md"] || !viewed["cmd/patchflow/main.go"] {
+		t.Fatalf("cleared path remains viewed: %#v", viewed)
+	}
+	if err := reopened.SetFileViewed(repository, "review-1", "target-b", "new-target.go", true); err != nil {
+		t.Fatal(err)
+	}
+	oldTarget, _ := reopened.ViewedFiles(repository, "review-1", "target-a")
+	newTarget, _ := reopened.ViewedFiles(repository, "review-1", "target-b")
+	if len(oldTarget) != 0 || !newTarget["new-target.go"] {
+		t.Fatalf("target change did not reset progress: old=%#v new=%#v", oldTarget, newTarget)
+	}
+}
+
+// TestStoreRejectsUnsafeViewedPaths prevents configuration keys from accepting traversal.
+func TestStoreRejectsUnsafeViewedPaths(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "config.json"))
+	if err := store.SetFileViewed(t.TempDir(), "review-1", "target", "../secret", true); err == nil {
+		t.Fatal("unsafe viewed path was accepted")
+	}
+}

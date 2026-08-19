@@ -69,6 +69,19 @@ func TestSharedV2Fixtures(t *testing.T) {
 	if review.SchemaVersion != 2 || len(review.Steps) != 2 || review.Steps[0].ReviewQuestion == "" || len(review.Steps[0].Attention) != 2 || review.Steps[0].Blocks[len(review.Steps[0].Blocks)-1].Type != "takeaway" {
 		t.Fatalf("unexpected review: %#v", review)
 	}
+	imageFound := false
+	for _, block := range review.Steps[0].Blocks {
+		if block.Type == "image" && block.Path == "assets/activation-screen.png" && block.Alt != "" {
+			imageFound = true
+		}
+	}
+	if !imageFound {
+		t.Fatal("valid image block was not parsed")
+	}
+	unsafeImage := strings.Replace(string(validSource), "assets/activation-screen.png", "assets/activation-screen.svg", 1)
+	if _, err := validator.Parse([]byte(unsafeImage)); err == nil || !strings.Contains(err.Error(), "PNG, JPEG, GIF, or WebP") {
+		t.Fatalf("unsafe image format was accepted: %v", err)
+	}
 
 	invalidPaths, err := filepath.Glob(filepath.Join("..", "..", "testdata", "artifacts", "v2", "invalid", "*.yaml"))
 	if err != nil {

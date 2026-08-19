@@ -79,6 +79,8 @@ type Block struct {
 	StartLine int    `json:"start_line,omitempty" yaml:"start_line,omitempty"`
 	EndLine   int    `json:"end_line,omitempty" yaml:"end_line,omitempty"`
 	Kind      string `json:"kind,omitempty" yaml:"kind,omitempty"`
+	Alt       string `json:"alt,omitempty" yaml:"alt,omitempty"`
+	Caption   string `json:"caption,omitempty" yaml:"caption,omitempty"`
 	Focus     *Focus `json:"focus,omitempty" yaml:"focus,omitempty"`
 	Collapsed bool   `json:"collapsed,omitempty" yaml:"collapsed,omitempty"`
 }
@@ -253,6 +255,15 @@ func validateSemantics(review *Review) []string {
 				found = append(found, validatePath(block.Path, label+".path", true)...)
 				if !strings.HasPrefix(block.Path, "diagrams/") {
 					found = append(found, label+".path must be inside diagrams/")
+				}
+			case "image":
+				found = append(found, validatePath(block.Path, label+".path", true)...)
+				if !strings.HasPrefix(block.Path, "assets/") {
+					found = append(found, label+".path must be inside assets/")
+				}
+				extension := strings.ToLower(path.Ext(block.Path))
+				if extension != ".png" && extension != ".jpg" && extension != ".jpeg" && extension != ".gif" && extension != ".webp" {
+					found = append(found, label+".path must use PNG, JPEG, GIF, or WebP")
 				}
 			}
 		}

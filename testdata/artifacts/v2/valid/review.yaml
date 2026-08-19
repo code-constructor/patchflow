@@ -54,6 +54,11 @@ steps:
       - id: activation-question
         type: question
         body: Should suspended accounts ever be reactivated automatically?
+      - id: activation-screen
+        type: image
+        path: assets/activation-screen.png
+        alt: Account page showing the active status
+        caption: The new status is visible beside the account name.
       - id: activation-takeaway
         type: takeaway
         body: The activation predicate remains the single owner of the transition rule.

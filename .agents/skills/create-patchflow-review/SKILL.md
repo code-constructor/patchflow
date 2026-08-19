@@ -102,6 +102,10 @@ blocks that explains why the code exists and how behavior moves through it:
   confirmation. Do not invent an answer or reply thread.
 - Use `diagram` only when a flow or relationship is clearer visually. Store its
   Mermaid source below the artifact's `diagrams/` directory.
+- Use `image` for evidence that is inherently visual, especially UI screenshots
+  and rendered output. Store PNG, JPEG, GIF, or WebP files below `assets/`, add
+  useful `alt` text, and use the optional Markdown `caption` to explain what the
+  reviewer should notice. Do not add SVG assets.
 
 Put prose before the code it explains. Avoid one prose block per file, repeated
 rationales, exhaustive unchanged context, and decorative diagrams. The blocks

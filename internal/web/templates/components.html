@@ -24,6 +24,12 @@
   <svg class="block-copy__icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H6l-4 2 1.5-4A9 9 0 1 1 21 12Z"></path><path d="M8 12h8M8 8h5"></path></svg>
 </button>{{end}}{{template "reference" .}}</div>{{end}}
 
+{{define "viewed_control"}}{{if .}}<form method="post" action="{{.Action}}" class="viewed-control" data-controller="viewed" data-viewed-key="{{.Key}}" data-turbo-stream><input type="hidden" name="path" value="{{.Path}}"><input type="hidden" name="viewed" value="{{if .Viewed}}true{{else}}false{{end}}" data-viewed-target="value"><label><input type="checkbox"{{if .Viewed}} checked{{end}} data-viewed-target="checkbox" data-action="change->viewed#change"><span class="viewed-control__box" aria-hidden="true">✓</span><span>Viewed</span></label></form>{{end}}{{end}}
+
+{{define "viewed_indicator"}}<span class="file-tree__viewed" data-viewed-indicator-key="{{.Key}}" title="{{if .Viewed}}Viewed{{else}}Not viewed{{end}}" aria-label="{{if .Viewed}}Viewed{{else}}Not viewed{{end}}">{{if .Viewed}}✓{{end}}</span>{{end}}
+
+{{define "turbo_viewed_update"}}<turbo-stream action="replace" targets="{{.ControlTargets}}"><template>{{template "viewed_control" .Control}}</template></turbo-stream><turbo-stream action="replace" targets="{{.IndicatorTargets}}"><template>{{template "viewed_indicator" .Control}}</template></turbo-stream>{{end}}
+
 {{define "thread_content"}}
   <header class="comment-thread__header"><div><span class="eyebrow">{{if .Resolved}}Resolved thread{{else}}Open thread{{end}}</span><strong>{{.TargetLabel}}</strong></div><div class="comment-thread__actions"><form method="post" action="{{.ResolutionAction}}" data-turbo-stream><input type="hidden" name="resolved" value="{{.ResolutionValue}}"><button type="submit" class="button-link" data-turbo-submits-with="Saving…">{{.ResolutionLabel}}</button></form>{{template "reference" .}}</div></header>
   <div class="comment-list">{{range .Comments}}<article class="comment{{if .Focused}} is-focused{{end}}" id="{{.ID}}">
@@ -78,13 +84,13 @@
     <aside class="review-block chapter-takeaway{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-heading"><div class="eyebrow">Chapter takeaway</div>{{template "block_actions" .}}</div>{{template "markdown" .Body}}{{template "discussion" .}}</aside>
   {{else if eq .Type "diff"}}
     <section class="review-block card code-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}" data-action="patchflow:diff-rendered->comment-thread#enhanceDiff">
-      <header class="code-card__header"><div><div class="eyebrow">Changed file</div><h3>{{.Path}}</h3></div><div class="code-card__meta">{{if .Focus}}<span class="focus-label">{{.Focus}}</span>{{end}}{{template "block_actions" .}}</div></header>
+      <header class="code-card__header"><div><div class="eyebrow">Changed file</div><h3>{{.Path}}</h3></div><div class="code-card__meta">{{if .Focus}}<span class="focus-label">{{.Focus}}</span>{{end}}{{template "viewed_control" .Viewed}}{{template "block_actions" .}}</div></header>
       {{if .Error}}<div class="diff-notice"><strong>Diff not displayed</strong><p>{{.Error}}. Review this generated or unusually large file directly in the repository.</p></div>{{else if .Collapsed}}<details class="evidence-disclosure"><summary>Show supporting diff</summary>{{template "diff" .}}</details>{{else}}{{template "diff" .}}{{end}}
       {{template "discussion" .}}
     </section>
   {{else if eq .Type "code"}}
     <section class="review-block card code-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}">
-      <header class="code-card__header"><div><div class="eyebrow">{{.SourceSide}} source</div><h3>{{.Path}}</h3></div><div class="code-card__meta"><span class="focus-label">lines {{.StartLine}}–{{.EndLine}}</span>{{template "block_actions" .}}</div></header>
+      <header class="code-card__header"><div><div class="eyebrow">{{.SourceSide}} source</div><h3>{{.Path}}</h3></div><div class="code-card__meta"><span class="focus-label">lines {{.StartLine}}–{{.EndLine}}</span>{{template "viewed_control" .Viewed}}{{template "block_actions" .}}</div></header>
       {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}<div class="code-excerpt">{{range .CodeLines}}<div class="code-excerpt__line" data-comment-line="{{.Number}}" data-comment-side="{{.Side}}"><span class="line-actions"><button type="button" class="line-comment-button" data-line="{{.Number}}" data-side="{{.Side}}" data-action="pointerdown->comment-thread#beginLineSelection" aria-label="Comment on {{.Side}} line {{.Number}}">+</button></span><span class="code-excerpt__number">{{.Number}}</span><code>{{.HTML}}</code></div>{{end}}</div>{{end}}
       {{template "discussion" .}}
     </section>
@@ -105,6 +111,14 @@
       {{end}}
       {{template "discussion" .}}
     </section>
+  {{else if eq .Type "image"}}
+    <figure class="review-block card image-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="image-viewer comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}">
+      <header class="image-card__header"><div><div class="eyebrow">Review image</div><strong>{{.Path}}</strong></div><div class="image-card__actions">{{template "block_actions" .}}{{if not .Error}}<button type="button" class="diagram-expand" data-action="image-viewer#expand" aria-label="Open image in fullscreen"><span aria-hidden="true">⛶</span> Expand</button>{{end}}</div></header>
+      {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}<button type="button" class="image-card__preview" data-action="image-viewer#expand" aria-label="Open {{.Alt}} in fullscreen"><img src="{{.ImageURL}}" alt="{{.Alt}}" loading="lazy" decoding="async"></button>{{end}}
+      {{if .Caption}}<figcaption>{{template "markdown" .Caption}}</figcaption>{{end}}
+      {{if not .Error}}<dialog class="image-dialog" data-image-viewer-target="dialog" data-action="click->image-viewer#dismiss close->image-viewer#restore"><div class="image-dialog__surface"><header class="diagram-dialog__header"><div><div class="eyebrow">Review image</div><strong>{{.Path}}</strong></div><button type="button" class="diagram-dialog__close" data-action="image-viewer#close" aria-label="Close fullscreen image">×</button></header><div class="image-dialog__canvas"><img src="{{.ImageURL}}" alt="{{.Alt}}"></div></div></dialog>{{end}}
+      {{template "discussion" .}}
+    </figure>
   {{end}}
   </turbo-frame>
 {{end}}

@@ -41,15 +41,15 @@ Build a vertical slice before recreating a full GitHub-like diff viewer:
 2. Create and validate a machine-readable review artifact.
 3. Render a review overview with an ordered set of review steps.
 4. Show a simple unified text diff in the planned order.
-5. Compose chapters from prose, code, diff, callout, question, diagram, and
-   takeaway blocks.
+5. Compose chapters from prose, code, diff, callout, question, diagram, image,
+   and takeaway blocks.
 6. Render Markdown, Mermaid, syntax-highlighted code, and split/unified diffs.
 7. Discuss whole blocks or immutable source ranges through addressable threads
    shared by the browser, CLI, and Coding Agents.
 8. Switch between the guided plan and an addressable changed-file tree without
    losing the reviewer's place in either view.
 
-Large-diff virtualization, GitHub PR import, notebook/image viewers, and
+Large-diff virtualization beyond viewport loading, GitHub PR import, notebook viewers, and
 elaborate keyboard navigation are later capabilities.
 
 ## Artifact Direction
@@ -67,7 +67,7 @@ Use a repository-local convention such as:
 `review.yaml` is the machine-readable source of truth for the review narrative. It should capture a
 schema version, immutable source refs, change summary, ordered review steps,
 priority rationale, narrative blocks, and review status. Mermaid source belongs
-in the artifact directory rather than existing only as rendered output. Legacy
+under `diagrams/`; PNG, JPEG, GIF, and WebP review images belong under `assets/`. Legacy
 v1 annotations and decisions remain readable; v2 deliberately omits them.
 Mutable discussion lives in a separately versioned `comments.yaml` beside the
 review so agent-authored narrative and reviewer conversation remain independent.

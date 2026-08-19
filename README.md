@@ -36,7 +36,7 @@ critiqued.
 2. Resolve and record the exact base and target commit SHAs.
 3. Let an agent explain the change and propose an ordered review plan.
 4. Read an agent-composed chapter built from prose, code, diff, callout,
-   question, diagram, and takeaway blocks.
+   question, diagram, image, and takeaway blocks.
 5. Link directly to a stable block ID and carry syntax-highlighted split or
    unified diff state in the URL.
 6. Discuss a whole block or selected source lines with humans and Coding Agents.
@@ -63,7 +63,8 @@ The repository-local convention is:
 schema version, immutable source refs, change summary, ordered review steps,
 priority rationales, narrative blocks, and review status. Markdown and Mermaid
 source remain part of the artifact instead of existing only as rendered UI
-state. `comments.yaml` is a separately versioned source of truth for block and
+state. Raster screenshots and other visual evidence live below `assets/` and
+render as responsive, fullscreen-capable image blocks. `comments.yaml` is a separately versioned source of truth for block and
 immutable source-range threads, including human and agent replies. It is created
 lazily when the first comment is saved. V1 review artifacts remain readable.
 
@@ -117,12 +118,16 @@ The initial vertical slice focuses on:
 - framing chapters with review questions, attention labels, decision gates, and
   addressable chapter takeaways;
 - displaying syntax-highlighted split and unified diffs in the planned order;
+- streaming every changed file down one continuous, tree-addressable page and
+  lazy-loading its diff near the viewport;
+- persisting personal Viewed progress in the local user configuration, with
+  collapsed viewed files in Files changed and non-collapsing status in the plan;
 - collapsing generated or mechanical evidence without removing it from scope;
-- rendering Markdown and Mermaid diagrams.
+- rendering Markdown, Mermaid diagrams, and safe raster image blocks;
 - persisting addressable block and code-range discussions with replies.
 
-Large-diff virtualization, GitHub pull-request import, specialized notebook or
-image viewers, and extensive keyboard navigation are deliberately deferred
+Large-diff virtualization beyond viewport loading, GitHub pull-request import,
+specialized notebook viewers, and extensive keyboard navigation are deliberately deferred
 until the core workflow is useful. Oversized files currently receive a visible
 placeholder so they do not block the rest of a review step.
 
@@ -243,6 +248,14 @@ extensible for future preferences:
       "path": "/workspace/example",
       "last_opened_at": "2026-08-19T12:00:00Z"
     }
+  ],
+  "review_progress": [
+    {
+      "repository_path": "/workspace/example",
+      "review_id": "20260819-120000-deadbeef",
+      "target_sha": "0123456789abcdef0123456789abcdef01234567",
+      "viewed_files": ["cmd/patchflow/main.go"]
+    }
   ]
 }
 ```
@@ -270,9 +283,13 @@ ref such as `main` to a committed target such as `HEAD`. Patchflow resolves the
 merge base and target SHA, creates a baseline review plan, and writes the result
 to the selected repository. Within a review, the global **Review plan** and
 **Files changed** tabs switch between the guided narrative and a classic file
-tree backed by the same immutable commits. Turbo navigation remembers the last
-resource and scroll position independently for both views in the current
-browser tab; every selected file still has its own shareable URL.
+tree backed by the same immutable commits. Files form one continuous page;
+their Turbo Frames load near the viewport, and selecting a tree path scrolls to
+its stable URL without throwing away the surrounding page. Turbo navigation
+remembers the last resource and scroll position independently for both views in
+the current browser tab. A Viewed toggle collapses that file in the classic
+view while the guided plan keeps its code visible and shows only the shared
+completion state. The state survives browsers and restarts in the local config.
 
 The same workflow is available from the command line:
 
