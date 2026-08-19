@@ -87,6 +87,7 @@
         "author_kind": { "enum": ["human", "agent"] },
         "body": { "$ref": "#/$defs/text" },
         "created_at": { "$ref": "#/$defs/timestamp" },
+        "updated_at": { "$ref": "#/$defs/timestamp" },
         "reply_to": { "$ref": "#/$defs/id" }
       }
     }

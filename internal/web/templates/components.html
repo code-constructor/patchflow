@@ -18,17 +18,20 @@
   <span class="visually-hidden" data-block-reference-target="status" aria-live="polite"></span>
 </button>{{end}}
 
-{{define "block_actions"}}<div class="block-actions">{{if .Commentable}}<button type="button" class="block-copy block-comment-action" data-action="comment-thread#openComposer" aria-label="Comment on {{.ReferenceLabel}}" title="Add comment">
+{{define "block_actions"}}<div class="block-actions">{{if .Threads}}<button type="button" class="block-copy block-thread-action" data-action="comment-thread#openBlockThreads" aria-label="Open discussions for {{.ReferenceLabel}}" title="Open discussions">
+  <svg class="block-copy__icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H6l-4 2 1.5-4A9 9 0 1 1 21 12Z"></path><path d="M8 12h8M8 8h5"></path></svg>
+</button>{{end}}{{if .Commentable}}<button type="button" class="block-copy block-comment-action" data-action="comment-thread#openComposer" aria-label="Comment on {{.ReferenceLabel}}" title="Add comment">
   <svg class="block-copy__icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H6l-4 2 1.5-4A9 9 0 1 1 21 12Z"></path><path d="M8 12h8M8 8h5"></path></svg>
 </button>{{end}}{{template "reference" .}}</div>{{end}}
 
 {{define "discussion"}}
   {{if .Commentable}}{{if .Threads}}<section class="discussion-panel" aria-label="Discussion for {{.ReferenceLabel}}">
-    <div class="thread-list">{{range .Threads}}<article class="comment-thread{{if .Focused}} is-focused{{end}}" id="{{.ID}}">
+    <div class="thread-list">{{range .Threads}}<article class="comment-thread{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-comment-thread-id="{{.ID}}">
       <header class="comment-thread__header"><div><span class="eyebrow">{{if .Resolved}}Resolved thread{{else}}Open thread{{end}}</span><strong>{{.TargetLabel}}</strong></div><div class="comment-thread__actions"><form method="post" action="{{.ResolutionAction}}"><input type="hidden" name="resolved" value="{{.ResolutionValue}}"><button type="submit" class="button-link">{{.ResolutionLabel}}</button></form>{{template "reference" .}}</div></header>
       <div class="comment-list">{{range .Comments}}<article class="comment{{if .Focused}} is-focused{{end}}" id="{{.ID}}">
-        <header class="comment__header"><div><strong>{{.Author}}</strong><span class="author-kind author-kind--{{.AuthorKind}}">{{.AuthorKind}}</span><time datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></div>{{template "reference" .}}</header>
+        <header class="comment__header"><div><strong>{{.Author}}</strong><span class="author-kind author-kind--{{.AuthorKind}}">{{.AuthorKind}}</span><time datetime="{{.CreatedAt}}">{{.CreatedAt}}</time>{{if .UpdatedAt}}<span class="comment-edited" title="Updated {{.UpdatedAt}}">edited</span>{{end}}</div>{{template "reference" .}}</header>
         {{template "markdown" .Body}}
+        {{if .CanEdit}}<details class="edit-comment"><summary>Edit comment</summary><form method="post" action="{{.EditAction}}" class="comment-form"><label>Comment<textarea name="body" required>{{.Body}}</textarea></label><button class="button button--small" type="submit">Save changes</button></form></details>{{end}}
       </article>{{end}}</div>
       <details class="reply-composer"><summary>Reply to thread</summary><form method="post" action="{{.ReplyAction}}" class="comment-form">
         <label>Your name<input name="author" value="{{.ReviewerName}}" required></label>
@@ -37,20 +40,20 @@
       </form></details>
     </article>{{end}}</div>
   </section>{{end}}
-    <div class="comment-composer" data-comment-thread-target="composer" popover="auto">
-      <header class="comment-composer__header"><div><span class="eyebrow">New comment</span><strong data-comment-thread-target="selectionLabel">Entire block</strong></div><button type="button" class="comment-composer__close" data-action="comment-thread#closeComposer" aria-label="Close comment composer">×</button></header>
+    <template data-comment-thread-target="composerTemplate"><div class="comment-popover comment-composer" popover="manual">
+      <header class="comment-composer__header"><div><span class="eyebrow">New comment</span><strong data-comment-role="selection-label">Entire block</strong></div><button type="button" class="comment-composer__close" data-action="comment-thread#closePopover" aria-label="Close comment composer">×</button></header>
       <form method="post" action="{{.ThreadAction}}" class="comment-form">
-        <input type="hidden" name="target_type" value="block" data-comment-thread-target="targetType">
+        <input type="hidden" name="target_type" value="block">
         <input type="hidden" name="path" value="{{.Path}}">
-        <input type="hidden" name="side" value="{{.SourceSide}}" data-comment-thread-target="side">
-        <input type="hidden" name="start_line" data-comment-thread-target="startLine">
-        <input type="hidden" name="end_line" data-comment-thread-target="endLine">
-        <div class="comment-selection" data-comment-thread-target="selection" hidden><span></span><button type="button" class="button-link" data-action="comment-thread#resetTarget">Comment on block instead</button></div>
+        <input type="hidden" name="side" value="{{.SourceSide}}">
+        <input type="hidden" name="start_line">
+        <input type="hidden" name="end_line">
+        <div class="comment-selection" data-comment-role="selection" hidden><span></span><button type="button" class="button-link" data-action="comment-thread#commentOnBlock">Comment on block instead</button></div>
         <label>Your name<input name="author" value="{{.ReviewerName}}" required></label>
-        <label>Comment<textarea name="body" required data-comment-thread-target="body" placeholder="What should the reviewer or agent know?"></textarea></label>
+        <label>Comment<textarea name="body" required placeholder="What should the reviewer or agent know?"></textarea></label>
         <button class="button button--small" type="submit">Start thread</button>
       </form>
-    </div>
+    </div></template>
   {{end}}
 {{end}}
 
@@ -72,7 +75,7 @@
   {{else if eq .Type "code"}}
     <section class="review-block card code-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}">
       <header class="code-card__header"><div><div class="eyebrow">{{.SourceSide}} source</div><h3>{{.Path}}</h3></div><div class="code-card__meta"><span class="focus-label">lines {{.StartLine}}–{{.EndLine}}</span>{{template "block_actions" .}}</div></header>
-      {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}<div class="code-excerpt">{{range .CodeLines}}<div class="code-excerpt__line" data-comment-line="{{.Number}}" data-comment-side="{{.Side}}"><button type="button" class="line-comment-button" data-line="{{.Number}}" data-side="{{.Side}}" data-action="pointerdown->comment-thread#beginLineSelection" aria-label="Comment on {{.Side}} line {{.Number}}">+</button><span class="code-excerpt__number">{{.Number}}</span><code>{{.HTML}}</code></div>{{end}}</div>{{end}}
+      {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}<div class="code-excerpt">{{range .CodeLines}}<div class="code-excerpt__line" data-comment-line="{{.Number}}" data-comment-side="{{.Side}}"><span class="line-actions"><button type="button" class="line-comment-button" data-line="{{.Number}}" data-side="{{.Side}}" data-action="pointerdown->comment-thread#beginLineSelection" aria-label="Comment on {{.Side}} line {{.Number}}">+</button></span><span class="code-excerpt__number">{{.Number}}</span><code>{{.HTML}}</code></div>{{end}}</div>{{end}}
       {{template "discussion" .}}
     </section>
   {{else if eq .Type "diagram"}}

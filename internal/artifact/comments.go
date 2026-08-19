@@ -46,6 +46,7 @@ type Comment struct {
 	AuthorKind string `json:"author_kind" yaml:"author_kind"`
 	Body       string `json:"body" yaml:"body"`
 	CreatedAt  string `json:"created_at" yaml:"created_at"`
+	UpdatedAt  string `json:"updated_at,omitempty" yaml:"updated_at,omitempty"`
 	ReplyTo    string `json:"reply_to,omitempty" yaml:"reply_to,omitempty"`
 }
 

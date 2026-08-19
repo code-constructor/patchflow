@@ -148,8 +148,11 @@ type CommentView struct {
 	AuthorKind     string
 	Body           string
 	CreatedAt      string
+	UpdatedAt      string
+	EditAction     string
 	ReferencePath  string
 	ReferenceLabel string
+	CanEdit        bool
 	Focused        bool
 }
 
@@ -239,6 +242,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.createThread(w, r)
 	case r.Method == http.MethodPost && matchActionPath(r.URL.Path, "threads", "replies"):
 		a.createReply(w, r)
+	case r.Method == http.MethodPost && matchActionPath(r.URL.Path, "comments", "edit"):
+		a.editComment(w, r)
 	case r.Method == http.MethodPost && matchActionPath(r.URL.Path, "threads", "resolution"):
 		a.updateThreadResolution(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/comments/"):
@@ -627,6 +632,36 @@ func (a *App) createReply(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 }
 
+// editComment updates one human-authored comment in the local review artifact.
+func (a *App) editComment(w http.ResponseWriter, r *http.Request) {
+	if !validMutationOrigin(r) {
+		http.Error(w, "Cross-origin form submission rejected", http.StatusForbidden)
+		return
+	}
+	repository, ok := a.requireRepository(w, r)
+	if !ok {
+		return
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 5 || parts[0] != "reviews" || parts[2] != "comments" || parts[4] != "edit" {
+		http.NotFound(w, r)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err == nil {
+		_, err = (&patchreview.DiscussionService{Store: store}).EditComment(parts[1], parts[3], r.FormValue("body"))
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	redirect(w, r, "/reviews/"+parts[1]+"/comments/"+parts[3], "notice", "Comment updated.")
+}
+
 // updateThreadResolution resolves or reopens one persisted discussion.
 func (a *App) updateThreadResolution(w http.ResponseWriter, r *http.Request) {
 	if !validMutationOrigin(r) {
@@ -743,8 +778,11 @@ func buildThreadViews(reviewID, blockID, reviewerName string, discussion *artifa
 				AuthorKind:     comment.AuthorKind,
 				Body:           comment.Body,
 				CreatedAt:      comment.CreatedAt,
+				UpdatedAt:      comment.UpdatedAt,
+				EditAction:     "/reviews/" + reviewID + "/comments/" + comment.ID + "/edit",
 				ReferencePath:  "/reviews/" + reviewID + "/comments/" + comment.ID,
 				ReferenceLabel: "comment " + comment.ID,
+				CanEdit:        comment.AuthorKind == "human",
 				Focused:        comment.ID == focusedCommentID,
 			})
 		}

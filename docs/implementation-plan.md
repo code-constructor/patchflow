@@ -120,8 +120,9 @@ and preserve author, creation time, resolution state, and reply order.
 
 Store the mutable discussion in a separately versioned `comments.yaml` so the
 review narrative remains stable. The browser offers icon-triggered whole-block
-comments, pointer-drag source ranges with a contextual overlay in code and diff
-blocks, replies, resolution, line markers, and copyable thread/comment paths.
+comments, pointer-drag source ranges, independently anchored draft windows,
+reopenable contextual discussions in code and diff blocks, editable human
+comments, replies, resolution, line markers, and copyable thread/comment paths.
 The CLI offers the same list, show, create, reply, resolve, and reopen lifecycle
 for humans and agents.
 

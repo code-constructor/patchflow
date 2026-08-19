@@ -92,6 +92,16 @@ func TestDiscussionServicePersistsBlockLinesAndReplies(t *testing.T) {
 	if reply.ID != "comment-reply" || reply.ReplyTo != "comment-opening" {
 		t.Fatalf("unexpected reply: %#v", reply)
 	}
+	edited, err := service.EditComment(stored.Review.ID, "comment-opening", "Is this public behavior intentional?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited.Body != "Is this public behavior intentional?" || edited.UpdatedAt == "" || edited.ID != "comment-opening" {
+		t.Fatalf("comment edit lost identity or timestamp: %#v", edited)
+	}
+	if _, err := service.EditComment(stored.Review.ID, "comment-reply", "Replace it"); err == nil {
+		t.Fatal("expected an agent comment to be protected from reviewer edits")
+	}
 	location, err := store.FindComment(stored.Review.ID, reply.ID)
 	if err != nil || location.Discussion.Threads[location.ThreadIndex].Target.StartLine != 2 {
 		t.Fatalf("comment lookup lost its source anchor: %v %#v", err, location)

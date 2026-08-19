@@ -91,9 +91,13 @@ Comment authoring stays out of the reading flow until it is needed. Use the
 speech-bubble action on a block for a block-wide thread. In code and diff
 blocks, press a line's `+`, drag to the last relevant line, and release to open
 the contextual composer for that immutable source range. Press and release on
-one line to target only that line. Patchflow pre-fills the reviewer name from
-the selected repository's effective `git config user.name`; `Reviewer` is used
-only when Git has no configured name.
+one line to target only that line. Each composer stays anchored at its opening
+position while the document scrolls, and multiple independent drafts can remain
+open at once. Persisted source discussions appear as numbered line markers and
+can be reopened contextually; human-authored comments can be edited without
+changing their stable IDs. Patchflow pre-fills the reviewer name from the
+selected repository's effective `git config user.name`; `Reviewer` is used only
+when Git has no configured name.
 
 Generated `.patchflow` artifacts are excluded from the diff under review by
 default, preventing Patchflow from reviewing its own output.

@@ -122,6 +122,33 @@ func (s *DiscussionService) Reply(reviewID, threadID string, input NewReply) (*a
 	return &comment, nil
 }
 
+// EditComment replaces one human comment body while preserving its stable identity and author.
+func (s *DiscussionService) EditComment(reviewID, commentID, body string) (*artifact.Comment, error) {
+	if s.Store == nil {
+		return nil, fmt.Errorf("discussion service requires a store")
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil, fmt.Errorf("comment body is required")
+	}
+	location, err := s.Store.FindComment(reviewID, commentID)
+	if err != nil {
+		return nil, err
+	}
+	comment := &location.Discussion.Threads[location.ThreadIndex].Comments[location.CommentIndex]
+	if comment.AuthorKind != "human" {
+		return nil, fmt.Errorf("agent comments cannot be edited from the reviewer interface")
+	}
+	now := s.now().UTC().Format(time.RFC3339)
+	comment.Body = body
+	comment.UpdatedAt = now
+	location.Discussion.UpdatedAt = now
+	if err := s.Store.WriteDiscussion(location.Stored, location.Discussion); err != nil {
+		return nil, err
+	}
+	return comment, nil
+}
+
 // SetResolved changes one thread's review state without altering its messages.
 func (s *DiscussionService) SetResolved(reviewID, threadID string, resolved bool) (*artifact.Thread, error) {
 	if s.Store == nil {

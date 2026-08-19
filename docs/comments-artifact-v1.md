@@ -24,7 +24,8 @@ same changed path as their diff block.
 
 Replies are stored in thread order and use `reply_to` to identify an earlier
 comment in the same thread. `resolved` records workflow state without deleting
-the conversation.
+the conversation. Editing a human comment preserves its ID, author, and
+`created_at` while recording the latest change in the optional `updated_at`.
 
 ```yaml
 schema_version: 1

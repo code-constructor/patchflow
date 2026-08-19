@@ -1,56 +1,187 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["body", "composer", "endLine", "selection", "selectionLabel", "side", "startLine", "targetType"]
+  static targets = ["composerTemplate"]
   static values = { anchors: Array }
 
-  /** connect prepares stable pointer handlers and marks existing discussions. */
+  /** connect prepares stable pointer handlers and restores persisted thread markers. */
   connect() {
     this.trackLineSelection = this.trackLineSelection.bind(this)
     this.finishLineSelection = this.finishLineSelection.bind(this)
     this.markAnchoredLines()
   }
 
-  /** disconnect releases a drag selection if Turbo removes its block mid-gesture. */
+  /** disconnect releases pointer handlers and closes top-layer windows owned by this block. */
   disconnect() {
     this.stopTrackingLines()
+    for (const popover of this.element.querySelectorAll(".comment-popover:popover-open")) popover.hidePopover()
   }
 
-  /** openComposer reveals a contextual whole-block popover beside its action. */
+  /** openComposer creates an independent whole-block draft beside its action. */
   openComposer(event) {
     event.preventDefault()
     event.stopPropagation()
-    this.resetTarget()
-    this.revealComposer(event.currentTarget)
+    this.clearActiveSelection()
+    this.revealComposer(event.currentTarget, null)
   }
 
-  /** closeComposer dismisses the authoring popover without changing discussion. */
-  closeComposer() {
-    if (this.composerTarget.matches(":popover-open")) this.composerTarget.hidePopover()
+  /** closePopover removes only the draft or discussion window containing the action. */
+  closePopover(event) {
+    const popover = event.currentTarget.closest(".comment-popover")
+    if (!popover) return
+    if (popover.matches(":popover-open")) popover.hidePopover()
+    popover.remove()
+    this.markSelectedLines()
   }
 
-  /** revealComposer opens and positions the popover beside its source action. */
-  revealComposer(anchor) {
-    if (!this.composerTarget.matches(":popover-open")) this.composerTarget.showPopover()
-    this.positionComposer(anchor)
-    this.bodyTarget.focus({ preventScroll: true })
+  /** commentOnBlock retargets one independent source draft without changing other drafts. */
+  commentOnBlock(event) {
+    const composer = event.currentTarget.closest(".comment-composer")
+    if (!composer) return
+    this.configureComposer(composer, null)
+    this.markSelectedLines()
   }
 
-  /** positionComposer keeps the overlay inside the current browser viewport. */
-  positionComposer(anchor) {
+  /** revealComposer clones, configures, and positions a new independent draft. */
+  revealComposer(anchor, selection) {
+    const fragment = this.composerTemplateTarget.content.cloneNode(true)
+    const composer = fragment.querySelector(".comment-composer")
+    this.configureComposer(composer, selection)
+    this.element.append(composer)
+    composer.showPopover()
+    this.positionPopover(composer, anchor)
+    composer.querySelector("textarea[name='body']")?.focus({ preventScroll: true })
+    this.clearActiveSelection()
+  }
+
+  /** configureComposer binds one cloned form to either its block or immutable source range. */
+  configureComposer(composer, selection) {
+    const form = composer.querySelector("form")
+    const selectionView = composer.querySelector("[data-comment-role='selection']")
+    const label = composer.querySelector("[data-comment-role='selection-label']")
+    form.elements.target_type.value = selection ? "code" : "block"
+    form.elements.start_line.value = selection ? `${selection.start}` : ""
+    form.elements.end_line.value = selection ? `${selection.end}` : ""
+    if (selection) {
+      form.elements.side.value = selection.side
+      const lines = selection.start === selection.end ? `line ${selection.start}` : `lines ${selection.start}–${selection.end}`
+      label.textContent = `${selection.side} ${lines}`
+      selectionView.querySelector("span").textContent = `Selected ${selection.side} ${lines}`
+      selectionView.hidden = false
+      composer.dataset.commentDraftSide = selection.side
+      composer.dataset.commentDraftStart = `${selection.start}`
+      composer.dataset.commentDraftEnd = `${selection.end}`
+      return
+    }
+    label.textContent = "Entire block"
+    selectionView.hidden = true
+    delete composer.dataset.commentDraftSide
+    delete composer.dataset.commentDraftStart
+    delete composer.dataset.commentDraftEnd
+  }
+
+  /** openBlockThreads opens every persisted discussion for this block beside its badge. */
+  openBlockThreads(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    const threadIDs = [...this.element.querySelectorAll(".comment-thread[data-comment-thread-id]")]
+      .map((thread) => thread.dataset.commentThreadId)
+    this.revealThreads(event.currentTarget, threadIDs)
+  }
+
+  /** openLineThreads reopens discussions anchored to the selected source line. */
+  openLineThreads(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    this.revealThreads(event.currentTarget, JSON.parse(event.currentTarget.dataset.threadIds || "[]"))
+  }
+
+  /** revealThreads clones persisted thread cards into an independent contextual window. */
+  revealThreads(anchor, threadIDs) {
+    const threads = threadIDs.map((threadID) => this.threadElement(threadID)).filter(Boolean)
+    if (threads.length === 0) return
+
+    const popover = document.createElement("section")
+    popover.className = "comment-popover thread-popover"
+    popover.setAttribute("popover", "manual")
+    const header = document.createElement("header")
+    header.className = "comment-composer__header"
+    const title = document.createElement("strong")
+    title.textContent = threads.length === 1 ? "Discussion" : `${threads.length} discussions`
+    const close = document.createElement("button")
+    close.type = "button"
+    close.className = "comment-composer__close"
+    close.dataset.action = "comment-thread#closePopover"
+    close.setAttribute("aria-label", "Close discussions")
+    close.textContent = "×"
+    header.append(title, close)
+    const list = document.createElement("div")
+    list.className = "thread-popover__list"
+    for (const thread of threads) {
+      const clone = thread.cloneNode(true)
+      clone.removeAttribute("id")
+      clone.removeAttribute("data-comment-thread-id")
+      for (const identified of clone.querySelectorAll("[id]")) identified.removeAttribute("id")
+      list.append(clone)
+    }
+    popover.append(header, list)
+    this.element.append(popover)
+    popover.showPopover()
+    this.positionPopover(popover, anchor)
+  }
+
+  /** threadElement returns the original rendered card for one stable thread ID. */
+  threadElement(threadID) {
+    return [...this.element.querySelectorAll(".comment-thread[data-comment-thread-id]")]
+      .find((thread) => thread.dataset.commentThreadId === threadID)
+  }
+
+  /** positionPopover anchors a window to document coordinates so scrolling leaves it behind. */
+  positionPopover(popover, anchor) {
     const anchorRect = anchor.getBoundingClientRect()
-    const composerRect = this.composerTarget.getBoundingClientRect()
+    const popoverRect = popover.getBoundingClientRect()
     const margin = 16
-    const left = Math.min(Math.max(margin, anchorRect.left), window.innerWidth - composerRect.width - margin)
+    const viewportLeft = Math.min(Math.max(margin, anchorRect.right + 8), window.innerWidth - popoverRect.width - margin)
     const preferredTop = anchorRect.bottom + 8
-    const top = preferredTop + composerRect.height <= window.innerHeight - margin
+    const viewportTop = preferredTop + popoverRect.height <= window.innerHeight - margin
       ? preferredTop
-      : Math.max(margin, anchorRect.top - composerRect.height - 8)
-    this.composerTarget.style.left = `${left}px`
-    this.composerTarget.style.top = `${top}px`
+      : Math.max(margin, anchorRect.top - popoverRect.height - 8)
+    const bounds = {
+      left: window.scrollX + margin,
+      right: window.scrollX + window.innerWidth - margin,
+      top: window.scrollY + margin,
+      bottom: window.scrollY + window.innerHeight - margin,
+    }
+    let left = window.scrollX + viewportLeft
+    let top = window.scrollY + viewportTop
+    const others = [...this.element.querySelectorAll(".comment-popover:popover-open")].filter((candidate) => candidate !== popover)
+    for (const other of others) {
+      const rect = other.getBoundingClientRect()
+      const documentRect = {
+        left: window.scrollX + rect.left,
+        right: window.scrollX + rect.right,
+        top: window.scrollY + rect.top,
+        bottom: window.scrollY + rect.bottom,
+      }
+      if (!this.popoversOverlap(left, top, popoverRect.width, popoverRect.height, documentRect)) continue
+      if (documentRect.right + 12 + popoverRect.width <= bounds.right) {
+        left = documentRect.right + 12
+      } else if (documentRect.left - 12 - popoverRect.width >= bounds.left) {
+        left = documentRect.left - 12 - popoverRect.width
+      } else {
+        top = Math.min(bounds.bottom - popoverRect.height, documentRect.top + 36)
+      }
+    }
+    popover.style.left = `${left}px`
+    popover.style.top = `${Math.max(bounds.top, top)}px`
   }
 
-  /** enhanceDiff adds drag handles after Diff2Html has rendered its rows. */
+  /** popoversOverlap reports whether a proposed window would obscure an open one. */
+  popoversOverlap(left, top, width, height, other) {
+    return left < other.right && left + width > other.left && top < other.bottom && top + height > other.top
+  }
+
+  /** enhanceDiff adds comment affordances after Diff2Html has rendered its rows. */
   enhanceDiff(event) {
     const output = event.target.querySelector("[data-diff-viewer-target='output']")
     if (!output) return
@@ -93,6 +224,26 @@ export default class extends Controller {
     cell.prepend(button)
   }
 
+  /** decorateThreadMarker adds a reusable discussion badge to one anchored source line. */
+  decorateThreadMarker(element, anchors) {
+    const host = element.querySelector(".line-actions") || element
+    let button = host.querySelector(".line-thread-button")
+    if (anchors.length === 0) {
+      button?.remove()
+      return
+    }
+    if (!button) {
+      button = document.createElement("button")
+      button.type = "button"
+      button.className = "line-thread-button"
+      button.dataset.action = "comment-thread#openLineThreads"
+      host.append(button)
+    }
+    button.dataset.threadIds = JSON.stringify(anchors.map((anchor) => anchor.id))
+    button.setAttribute("aria-label", `Open ${anchors.length} ${anchors.length === 1 ? "discussion" : "discussions"} on this line`)
+    button.textContent = `${anchors.length}`
+  }
+
   /** beginLineSelection starts a one-line selection that may be extended by dragging. */
   beginLineSelection(event) {
     if (event.button !== 0) return
@@ -121,11 +272,12 @@ export default class extends Controller {
     this.markSelectedLines()
   }
 
-  /** finishLineSelection persists the chosen range in the form and opens its overlay. */
+  /** finishLineSelection opens a new independent draft for the selected range. */
   finishLineSelection(event) {
     this.trackLineSelection(event)
     this.stopTrackingLines()
-    this.applySelection(this.dragAnchor)
+    const selection = { side: this.selectedSide, start: this.selectedStart, end: this.selectedEnd }
+    this.revealComposer(this.dragAnchor, selection)
   }
 
   /** stopTrackingLines releases global handlers and native-selection suppression. */
@@ -135,48 +287,37 @@ export default class extends Controller {
     document.documentElement.classList.remove("is-line-selecting")
   }
 
-  /** applySelection synchronizes the visible range and submitted immutable anchor. */
-  applySelection(anchor) {
-    this.targetTypeTarget.value = "code"
-    this.sideTarget.value = this.selectedSide
-    this.startLineTarget.value = `${this.selectedStart}`
-    this.endLineTarget.value = `${this.selectedEnd}`
-    const lines = this.selectedStart === this.selectedEnd ? `line ${this.selectedStart}` : `lines ${this.selectedStart}–${this.selectedEnd}`
-    this.selectionLabelTarget.textContent = `${this.selectedSide} ${lines}`
-    this.selectionTarget.querySelector("span").textContent = `Selected ${this.selectedSide} ${lines}`
-    this.selectionTarget.hidden = false
-    this.markSelectedLines()
-    this.revealComposer(anchor)
-  }
-
-  /** resetTarget returns the composer to a whole-block discussion. */
-  resetTarget() {
-    this.targetTypeTarget.value = "block"
-    this.startLineTarget.value = ""
-    this.endLineTarget.value = ""
-    this.selectionLabelTarget.textContent = "Entire block"
-    this.selectionTarget.hidden = true
+  /** clearActiveSelection removes only the transient pointer-drag range. */
+  clearActiveSelection() {
     this.selectedSide = null
     this.selectedStart = null
     this.selectedEnd = null
     this.markSelectedLines()
   }
 
-  /** markSelectedLines highlights the range currently targeted by the composer. */
+  /** markSelectedLines highlights every open draft range plus the active drag range. */
   markSelectedLines() {
+    const drafts = [...this.element.querySelectorAll(".comment-composer[data-comment-draft-side]")]
+      .map((composer) => ({
+        side: composer.dataset.commentDraftSide,
+        start: Number.parseInt(composer.dataset.commentDraftStart, 10),
+        end: Number.parseInt(composer.dataset.commentDraftEnd, 10),
+      }))
+    if (this.selectedSide) drafts.push({ side: this.selectedSide, start: this.selectedStart, end: this.selectedEnd })
     for (const element of this.element.querySelectorAll("[data-comment-line][data-comment-side]")) {
       const line = Number.parseInt(element.dataset.commentLine, 10)
-      const selected = element.dataset.commentSide === this.selectedSide && line >= this.selectedStart && line <= this.selectedEnd
-      element.classList.toggle("is-comment-selected", Boolean(selected))
+      const selected = drafts.some((draft) => draft.side === element.dataset.commentSide && line >= draft.start && line <= draft.end)
+      element.classList.toggle("is-comment-selected", selected)
     }
   }
 
-  /** markAnchoredLines highlights every source line covered by a persisted thread. */
+  /** markAnchoredLines highlights source lines and adds controls for persisted discussions. */
   markAnchoredLines() {
     for (const element of this.element.querySelectorAll("[data-comment-line][data-comment-side]")) {
       const line = Number.parseInt(element.dataset.commentLine, 10)
-      const anchored = this.anchorsValue.some((anchor) => anchor.side === element.dataset.commentSide && line >= anchor.start && line <= anchor.end)
-      element.classList.toggle("has-comment-thread", anchored)
+      const anchors = this.anchorsValue.filter((anchor) => anchor.side === element.dataset.commentSide && line >= anchor.start && line <= anchor.end)
+      element.classList.toggle("has-comment-thread", anchors.length > 0)
+      this.decorateThreadMarker(element, anchors)
     }
   }
 }

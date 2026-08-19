@@ -47,7 +47,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 			t.Errorf("chapter missing %q", expected)
 		}
 	}
-	for _, expected := range []string{"aria-label=\"Comment on block domain-intro\"", "title=\"Add comment\"", "popover=\"auto\"", "name=\"author\" value=\"Patchflow Test\""} {
+	for _, expected := range []string{"aria-label=\"Comment on block domain-intro\"", "title=\"Add comment\"", "popover=\"manual\"", "data-comment-thread-target=\"composerTemplate\"", "name=\"author\" value=\"Patchflow Test\""} {
 		if !strings.Contains(chapter.Body.String(), expected) {
 			t.Errorf("chapter comment action missing %q", expected)
 		}
@@ -81,7 +81,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		t.Fatalf("chapter navigation does not scroll in place: %d", chapterController.Code)
 	}
 	commentController := perform(app, http.MethodGet, "/assets/controllers/comment_thread_controller.js", "")
-	if commentController.Code != http.StatusOK || !strings.Contains(commentController.Body.String(), "pointermove") || !strings.Contains(commentController.Body.String(), "showPopover") || !strings.Contains(commentController.Body.String(), "enhanceDiff") {
+	if commentController.Code != http.StatusOK || !strings.Contains(commentController.Body.String(), "pointermove") || !strings.Contains(commentController.Body.String(), "showPopover") || !strings.Contains(commentController.Body.String(), "cloneNode") || !strings.Contains(commentController.Body.String(), "enhanceDiff") {
 		t.Fatalf("comment thread controller unavailable: %d", commentController.Code)
 	}
 	diagramController := perform(app, http.MethodGet, "/assets/controllers/diagram_viewer_controller.js", "")
@@ -121,7 +121,7 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 	reviewID := strings.TrimPrefix(reviewPath, "/reviews/")
 
 	opening := perform(app, http.MethodPost, reviewPath+"/blocks/domain-intro/threads", url.Values{
-		"target_type": {"block"}, "author": {"Alex"}, "body": {"Please explain this boundary."},
+		"target_type": {"block"}, "author": {"Patchflow Test"}, "body": {"Please explain this boundary."},
 	}.Encode())
 	if opening.Code != http.StatusSeeOther || !strings.Contains(opening.Header().Get("Location"), reviewPath+"/threads/thread-") {
 		t.Fatalf("block comment failed: %d %s", opening.Code, opening.Body.String())
@@ -134,10 +134,23 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 	}
 	thread := discussion.Threads[0]
 	threadPage := perform(app, http.MethodGet, reviewPath+"/threads/"+thread.ID, "")
-	for _, expected := range []string{"Please explain this boundary.", "comment-thread is-focused", reviewPath + "/comments/" + thread.Comments[0].ID, "data-controller=\"comment-thread\"", "name=\"author\" value=\"Patchflow Test\""} {
+	for _, expected := range []string{"Please explain this boundary.", "comment-thread is-focused", reviewPath + "/comments/" + thread.Comments[0].ID, "data-controller=\"comment-thread\"", "name=\"author\" value=\"Patchflow Test\"", "data-comment-thread-id=\"" + thread.ID + "\"", "Edit comment"} {
 		if !strings.Contains(threadPage.Body.String(), expected) {
 			t.Errorf("thread page missing %q", expected)
 		}
+	}
+
+	edited := perform(app, http.MethodPost, reviewPath+"/comments/"+thread.Comments[0].ID+"/edit", url.Values{"body": {"Please explain the ownership boundary."}}.Encode())
+	if edited.Code != http.StatusSeeOther || !strings.Contains(edited.Header().Get("Location"), reviewPath+"/comments/"+thread.Comments[0].ID) {
+		t.Fatalf("comment edit failed: %d %s", edited.Code, edited.Body.String())
+	}
+	discussion, _ = store.ReadDiscussion(stored)
+	if discussion.Threads[0].Comments[0].Body != "Please explain the ownership boundary." || discussion.Threads[0].Comments[0].UpdatedAt == "" {
+		t.Fatalf("comment edit was not persisted: %#v", discussion.Threads[0].Comments[0])
+	}
+	editedPage := perform(app, http.MethodGet, reviewPath+"/comments/"+thread.Comments[0].ID, "")
+	if editedPage.Code != http.StatusOK || !strings.Contains(editedPage.Body.String(), "Please explain the ownership boundary.") || !strings.Contains(editedPage.Body.String(), "comment-edited") {
+		t.Fatalf("edited comment cannot be reopened: %d %s", editedPage.Code, editedPage.Body.String())
 	}
 
 	reply := perform(app, http.MethodPost, reviewPath+"/threads/"+thread.ID+"/replies", url.Values{"author": {"Reviewer 2"}, "body": {"The service owns the persistence boundary."}}.Encode())
