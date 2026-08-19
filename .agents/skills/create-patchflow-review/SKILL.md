@@ -186,6 +186,13 @@ Load and validate an existing artifact before editing it. Compare its
   review unless the user explicitly requests a revision.
 - Never silently rewrite `base_sha` or `target_sha` in an existing artifact.
 
+Comments remain with the review ID and immutable commit they were written
+against. Before replacing a stale review, inspect its unresolved threads with
+`patchflow comments` and report them to the user. Do not copy thread/comment IDs
+or old code anchors into the new `comments.yaml`. Carry a still-relevant concern
+forward only through an explicit new thread after mapping it to a valid block or
+source range in the new review; preserve the old conversation unchanged.
+
 ## Validate
 
 Run the canonical validator when Patchflow is available:

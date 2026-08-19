@@ -10,11 +10,60 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/traqx-ai/patchflow/internal/artifact"
+	"github.com/traqx-ai/patchflow/internal/gitrepo"
 	patchreview "github.com/traqx-ai/patchflow/internal/review"
 	yaml "go.yaml.in/yaml/v3"
 )
+
+// TestReviewDashboardSeparatesCurrentAndStaleEvidence keeps the next review obvious without hiding old discussion.
+func TestReviewDashboardSeparatesCurrentAndStaleEvidence(t *testing.T) {
+	repositoryPath := featureRepository(t)
+	repository, err := gitrepo.Open(repositoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldReview, err := (&patchreview.Creator{Repository: repository, Store: store, Now: func() time.Time {
+		return time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC)
+	}}).Create("main", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	openingBlock := oldReview.Review.Steps[0].Blocks[0]
+	if _, err := (&patchreview.DiscussionService{Store: store}).CreateThread(oldReview.Review.ID, patchreview.NewThread{
+		BlockID: openingBlock.ID, TargetType: "block", Author: "Reviewer", AuthorKind: "human", Body: "Carry this concern forward deliberately.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	write(t, repositoryPath, "app/models/account.rb", "class Account\n  def locked? = true\n  def active? = true\nend\n")
+	git(t, repositoryPath, "add", "app/models/account.rb")
+	git(t, repositoryPath, "commit", "-m", "Advance target")
+	currentReview, err := (&patchreview.Creator{Repository: repository, Store: store, Now: func() time.Time {
+		return time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
+	}}).Create("main", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := newTestApp(t, repositoryPath)
+	response := perform(app, http.MethodGet, repositoryBasePath(repository), "")
+	body := response.Body.String()
+	for _, expected := range []string{"Current reviews", "Latest", "Draft describes review progress", "Stale review history", "1 unresolved thread", "Immutable evidence for older commits"} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("review dashboard missing %q", expected)
+		}
+	}
+	currentPosition := strings.Index(body, "/reviews/"+currentReview.Review.ID)
+	stalePosition := strings.Index(body, "/reviews/"+oldReview.Review.ID)
+	if currentPosition < 0 || stalePosition < 0 || currentPosition >= stalePosition {
+		t.Fatalf("current review was not placed before stale evidence: current=%d stale=%d", currentPosition, stalePosition)
+	}
+}
 
 // TestAppRunsRepositoryToChapterFlow exercises repository selection through chapter rendering.
 func TestAppRunsRepositoryToChapterFlow(t *testing.T) {

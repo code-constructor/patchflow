@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/traqx-ai/patchflow/internal/artifact"
 	"github.com/traqx-ai/patchflow/internal/gitrepo"
@@ -59,7 +60,9 @@ type Page struct {
 	Repository       *RepositoryView
 	Repositories     []RepositoryView
 	RepositoryPath   string
-	Reviews          []ReviewListItem
+	CurrentReviews   []ReviewListItem
+	StaleReviews     []ReviewListItem
+	StaleThreadLabel string
 	BaseRef          string
 	TargetRef        string
 	Review           *ReviewView
@@ -79,14 +82,18 @@ type RepositoryView struct {
 	Name, Path, BasePath, ReviewLabel string
 }
 
-// ReviewListItem is the compact representation used by the home-page review list.
-type ReviewListItem struct{ ID, Title, Summary, Status string }
+// ReviewListItem summarizes one review's lifecycle, Git freshness, and discussion state.
+type ReviewListItem struct {
+	ID, Title, Summary, Status, StatusKey string
+	CreatedAt, Comparison, ThreadLabel    string
+	Latest                                bool
+}
 
 // ReviewView is the overview page model for one stored review.
 type ReviewView struct {
-	ID, Title, Summary, Status, BaseSHA, TargetSHA, Overview string
-	Stale                                                    bool
-	Steps                                                    []StepLink
+	ID, Title, Summary, Status, StatusKey, BaseSHA, TargetSHA, Overview string
+	Stale                                                               bool
+	Steps                                                               []StepLink
 }
 
 // StepLink is a navigable chapter summary.
@@ -380,8 +387,21 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 			if allErr != nil {
 				page.Alert = allErr.Error()
 			} else {
-				for _, item := range stored {
-					page.Reviews = append(page.Reviews, ReviewListItem{ID: item.Review.ID, Title: item.Review.Change.Title, Summary: item.Review.Change.Summary, Status: humanize(item.Review.Status)})
+				staleOpenThreads := 0
+				for index := range stored {
+					item, stale, openThreads := buildReviewListItem(repository, store, &stored[index])
+					if stale {
+						page.StaleReviews = append(page.StaleReviews, item)
+						staleOpenThreads += openThreads
+					} else {
+						page.CurrentReviews = append(page.CurrentReviews, item)
+					}
+				}
+				if len(page.CurrentReviews) > 0 {
+					page.CurrentReviews[0].Latest = true
+				}
+				if staleOpenThreads > 0 {
+					page.StaleThreadLabel = openThreadLabel(staleOpenThreads)
 				}
 			}
 		} else {
@@ -391,6 +411,56 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 		page.Alert = err.Error()
 	}
 	a.render(w, "home", page, http.StatusOK)
+}
+
+// buildReviewListItem derives display state without mutating immutable review artifacts.
+func buildReviewListItem(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored) (ReviewListItem, bool, int) {
+	openThreads := 0
+	if discussion, err := store.ReadDiscussion(stored); err == nil {
+		for _, thread := range discussion.Threads {
+			if !thread.Resolved {
+				openThreads++
+			}
+		}
+	}
+	review := stored.Review
+	item := ReviewListItem{
+		ID: review.ID, Title: review.Change.Title, Summary: review.Change.Summary,
+		Status: humanize(review.Status), StatusKey: review.Status,
+		CreatedAt: formatReviewTimestamp(review.CreatedAt), Comparison: review.Source.BaseRef + " → " + review.Source.TargetRef,
+		ThreadLabel: openThreadLabel(openThreads),
+	}
+	return item, reviewIsStale(repository, review), openThreads
+}
+
+// reviewIsStale reports whether stored evidence no longer represents its moving target ref.
+func reviewIsStale(repository *gitrepo.Repository, review *artifact.Review) bool {
+	if review.Status == "stale" {
+		return true
+	}
+	changed, err := repository.TargetChanged(review.Source.TargetRef, review.Source.TargetSHA)
+	return err != nil || changed
+}
+
+// formatReviewTimestamp turns an artifact timestamp into compact UTC list metadata.
+func formatReviewTimestamp(value string) string {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return value
+	}
+	return parsed.UTC().Format("02 Jan 2006 · 15:04 UTC")
+}
+
+// openThreadLabel describes unresolved discussion without displaying an empty count.
+func openThreadLabel(count int) string {
+	switch count {
+	case 0:
+		return ""
+	case 1:
+		return "1 unresolved thread"
+	default:
+		return fmt.Sprintf("%d unresolved threads", count)
+	}
 }
 
 // repositoryPicker renders one safely bounded directory level into a Turbo Frame.
@@ -498,11 +568,8 @@ func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		overview = err.Error()
 	}
-	stale, staleErr := repository.TargetChanged(stored.Review.Source.TargetRef, stored.Review.Source.TargetSHA)
-	if staleErr != nil {
-		stale = false
-	}
-	view := ReviewView{ID: id, Title: stored.Review.Change.Title, Summary: stored.Review.Change.Summary, Status: humanize(stored.Review.Status), BaseSHA: stored.Review.Source.BaseSHA, TargetSHA: stored.Review.Source.TargetSHA, Overview: overview, Stale: stale}
+	stale := reviewIsStale(repository, stored.Review)
+	view := ReviewView{ID: id, Title: stored.Review.Change.Title, Summary: stored.Review.Change.Summary, Status: humanize(stored.Review.Status), StatusKey: stored.Review.Status, BaseSHA: stored.Review.Source.BaseSHA, TargetSHA: stored.Review.Source.TargetSHA, Overview: overview, Stale: stale}
 	for _, step := range stored.Review.Steps {
 		view.Steps = append(view.Steps, StepLink{ID: step.ID, Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, Attention: step.Attention})
 	}

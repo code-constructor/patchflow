@@ -105,6 +105,20 @@ discussion through targeted Turbo Streams. Open popovers, the surrounding
 chapter, and the reader's scroll position remain in place, while the submitting
 control exposes a compact loading state.
 
+Repository review lists separate current evidence from collapsed stale
+history. `Draft` remains the lifecycle status of an unfinished review; `Stale`
+means its target ref no longer resolves to the recorded target commit. The
+newest non-stale review is highlighted first. Stale entries remain available
+as immutable history and show their unresolved-thread count.
+
+Comments are never copied automatically into a replacement review. Each
+`comments.yaml` remains beside its original `review.yaml`, and code threads are
+anchored to that review's immutable commit SHA and block IDs. Automatic copying
+would make old line anchors appear valid against different source. Unresolved
+threads therefore remain visible on stale history; carrying one forward must be
+an explicit re-anchoring into a new thread with a new ID while preserving the
+old conversation as evidence.
+
 Generated `.patchflow` artifacts are excluded from the diff under review by
 default, preventing Patchflow from reviewing its own output.
 

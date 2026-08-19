@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="breadcrumb"><a href="{{.BasePath}}">← {{.RepositoryName}}</a></div>
-<section class="row row--between"><div><div class="eyebrow">Review overview</div><h2>{{.Review.Title}}</h2><p class="muted">{{.Review.Summary}}</p></div><span class="status">{{.Review.Status}}</span></section>
+<section class="row row--between"><div><div class="eyebrow">Review overview</div><h2>{{.Review.Title}}</h2><p class="muted">{{.Review.Summary}}</p></div><span class="review-link__badges">{{if not (and .Review.Stale (eq .Review.StatusKey "stale"))}}<span class="review-badge review-badge--{{.Review.StatusKey}}">{{.Review.Status}}</span>{{end}}{{if .Review.Stale}}<span class="review-badge review-badge--stale">Stale</span>{{end}}</span></section>
 {{if .Review.Stale}}<p class="warning">The target ref no longer points at this artifact's target SHA. This review is stale evidence for the current branch.</p>{{end}}
 <dl class="metadata section"><div><dt>Base</dt><dd class="sha" title="{{.Review.BaseSHA}}">{{short .Review.BaseSHA}}</dd></div><div><dt>Target</dt><dd class="sha" title="{{.Review.TargetSHA}}">{{short .Review.TargetSHA}}</dd></div><div><dt>Artifact</dt><dd class="sha">{{.Review.ID}}</dd></div></dl>
 <section class="section"><article class="card review-contract"><div class="eyebrow">Review contract</div><h2>Purpose, decisions, risks, and evidence</h2>{{template "markdown" .Review.Overview}}</article></section>
