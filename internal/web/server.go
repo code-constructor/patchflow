@@ -2,6 +2,8 @@ package web
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -26,6 +28,14 @@ var embedded embed.FS
 
 const repositoryCookie = "patchflow_repository"
 
+type repositoryScopeKey struct{}
+
+// repositoryScope identifies one repository without exposing its local path in URLs.
+type repositoryScope struct {
+	Key      string
+	BasePath string
+}
+
 // App is Patchflow's dependency container and HTTP handler.
 type App struct {
 	templates         map[string]*template.Template
@@ -38,6 +48,7 @@ type App struct {
 // Page contains the shared and route-specific data rendered by the layout.
 type Page struct {
 	Title          string
+	BasePath       string
 	RepositoryName string
 	Notice         string
 	Alert          string
@@ -75,6 +86,7 @@ type StepLink struct {
 
 // ChapterView contains one resolved review step and its neighboring navigation.
 type ChapterView struct {
+	BasePath       string
 	ReviewID       string
 	Number         int
 	Total          int
@@ -241,6 +253,14 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/repositories/") {
+		var ok bool
+		r, ok = requestWithinRepositoryScope(r)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+	}
 
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/":
@@ -283,6 +303,8 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	page := Page{Title: "Patchflow · Understand the change", RepositoryPath: a.defaultRepository, PickerRoot: a.browseRoot, Notice: r.URL.Query().Get("notice"), Alert: r.URL.Query().Get("alert")}
 	repository, err := a.currentRepository(r)
 	if err == nil && repository != nil {
+		page.BasePath = repositoryBasePath(repository)
+		setScopedRepositoryCookie(w, repository)
 		page.Repository = &RepositoryView{Name: repository.Name(), Path: repository.Root()}
 		page.RepositoryName = repository.Name()
 		page.Title = repository.Name() + " · Patchflow"
@@ -301,7 +323,7 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if err != nil {
 		page.Alert = err.Error()
-		clearRepositoryCookie(w)
+		clearRepositoryCookie(w, repositoryScopeFromRequest(r).Key)
 	}
 	a.render(w, "home", page, http.StatusOK)
 }
@@ -328,13 +350,13 @@ func (a *App) openRepository(w http.ResponseWriter, r *http.Request) {
 		a.render(w, "home", Page{Title: "Patchflow", RepositoryPath: r.FormValue("repository_path"), Alert: err.Error()}, http.StatusUnprocessableEntity)
 		return
 	}
-	setRepositoryCookie(w, repository.Root())
-	redirect(w, r, "/reviews/new", "notice", "Opened "+repository.Name()+".")
+	setScopedRepositoryCookie(w, repository)
+	redirect(w, r, repositoryBasePath(repository)+"/reviews/new", "notice", "Opened "+repository.Name()+".")
 }
 
 // closeRepository forgets the local repository selection and returns home.
 func (a *App) closeRepository(w http.ResponseWriter, r *http.Request) {
-	clearRepositoryCookie(w)
+	clearRepositoryCookie(w, repositoryScopeFromRequest(r).Key)
 	redirect(w, r, "/", "notice", "Repository closed.")
 }
 
@@ -352,7 +374,7 @@ func (a *App) newReview(w http.ResponseWriter, r *http.Request) {
 	if targetRef == "" {
 		targetRef = "HEAD"
 	}
-	a.render(w, "new", Page{Title: "New review · Patchflow", RepositoryName: repository.Name(), BaseRef: baseRef, TargetRef: targetRef, Alert: r.URL.Query().Get("alert")}, http.StatusOK)
+	a.render(w, "new", Page{Title: "New review · Patchflow", BasePath: requestRepositoryBasePath(r, repository), RepositoryName: repository.Name(), BaseRef: baseRef, TargetRef: targetRef, Alert: r.URL.Query().Get("alert")}, http.StatusOK)
 }
 
 // createReview delegates artifact creation and redirects to the resulting overview.
@@ -371,12 +393,12 @@ func (a *App) createReview(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		stored, createErr := (&patchreview.Creator{Repository: repository, Store: store}).Create(baseRef, targetRef)
 		if createErr == nil {
-			redirect(w, r, "/reviews/"+stored.Review.ID, "notice", "Review artifact created.")
+			redirect(w, r, requestRepositoryBasePath(r, repository)+"/reviews/"+stored.Review.ID, "notice", "Review artifact created.")
 			return
 		}
 		err = createErr
 	}
-	a.render(w, "new", Page{Title: "New review · Patchflow", RepositoryName: repository.Name(), BaseRef: baseRef, TargetRef: targetRef, Alert: err.Error()}, http.StatusUnprocessableEntity)
+	a.render(w, "new", Page{Title: "New review · Patchflow", BasePath: requestRepositoryBasePath(r, repository), RepositoryName: repository.Name(), BaseRef: baseRef, TargetRef: targetRef, Alert: err.Error()}, http.StatusUnprocessableEntity)
 }
 
 // overview loads one review, detects staleness, and renders its ordered plan.
@@ -393,7 +415,7 @@ func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 	store, _ := patchreview.NewStore(repository.Root(), nil)
 	stored, err := store.Find(id)
 	if err != nil {
-		redirect(w, r, "/", "alert", "Review not found.")
+		redirect(w, r, requestRepositoryBasePath(r, repository), "alert", "Review not found.")
 		return
 	}
 	overview, err := store.ReadOverview(stored)
@@ -408,7 +430,7 @@ func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 	for _, step := range stored.Review.Steps {
 		view.Steps = append(view.Steps, StepLink{ID: step.ID, Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, Attention: step.Attention})
 	}
-	a.render(w, "overview", Page{Title: view.Title + " · Patchflow", RepositoryName: repository.Name(), Notice: r.URL.Query().Get("notice"), Review: &view}, http.StatusOK)
+	a.render(w, "overview", Page{Title: view.Title + " · Patchflow", BasePath: requestRepositoryBasePath(r, repository), RepositoryName: repository.Name(), Notice: r.URL.Query().Get("notice"), Review: &view}, http.StatusOK)
 }
 
 // chapter resolves an artifact step into renderable prose, code, diff, and diagram blocks.
@@ -425,7 +447,7 @@ func (a *App) chapter(w http.ResponseWriter, r *http.Request) {
 	store, _ := patchreview.NewStore(repository.Root(), nil)
 	stored, err := store.Find(parts[1])
 	if err != nil {
-		redirect(w, r, "/", "alert", "Review not found.")
+		redirect(w, r, requestRepositoryBasePath(r, repository), "alert", "Review not found.")
 		return
 	}
 	stepIndex := -1
@@ -436,16 +458,16 @@ func (a *App) chapter(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if stepIndex < 0 {
-		redirect(w, r, "/reviews/"+stored.Review.ID, "alert", "Review step not found.")
+		redirect(w, r, requestRepositoryBasePath(r, repository)+"/reviews/"+stored.Review.ID, "alert", "Review step not found.")
 		return
 	}
-	a.renderChapter(w, repository, store, stored, stepIndex, "", "", "", r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
+	a.renderChapter(w, repository, store, stored, requestRepositoryBasePath(r, repository), stepIndex, "", "", "", r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
 }
 
 // renderChapter resolves one step and optionally highlights an addressed block.
-func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, stepIndex int, focusedBlockID, focusedThreadID, focusedCommentID, notice, alert string) {
+func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, basePath string, stepIndex int, focusedBlockID, focusedThreadID, focusedCommentID, notice, alert string) {
 	step := stored.Review.Steps[stepIndex]
-	chapter := ChapterView{ReviewID: stored.Review.ID, Number: stepIndex + 1, Total: len(stored.Review.Steps), Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, ReviewQuestion: step.ReviewQuestion, Attention: step.Attention, DesignGate: step.Priority == "critical" && step.ReviewQuestion != ""}
+	chapter := ChapterView{BasePath: basePath, ReviewID: stored.Review.ID, Number: stepIndex + 1, Total: len(stored.Review.Steps), Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, ReviewQuestion: step.ReviewQuestion, Attention: step.Attention, DesignGate: step.Priority == "critical" && step.ReviewQuestion != ""}
 	if stepIndex > 0 {
 		previous := stored.Review.Steps[stepIndex-1]
 		chapter.Previous = &StepLink{ID: previous.ID, Title: previous.Title}
@@ -473,17 +495,17 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 	}
 	for _, block := range blocks {
 		view := buildBlock(repository, store, stored, files, block)
-		view.ReferencePath = "/reviews/" + stored.Review.ID + "/blocks/" + block.ID
+		view.ReferencePath = basePath + "/reviews/" + stored.Review.ID + "/blocks/" + block.ID
 		view.ReferenceLabel = "block " + block.ID
 		view.Label = blockLabel(block)
 		view.Focused = block.ID == focusedBlockID
 		view.Commentable = stored.Review.SchemaVersion == 2
 		view.ThreadAction = view.ReferencePath + "/threads"
 		view.ReviewerName = reviewerName
-		view.Threads, view.ThreadAnchors = buildThreadViews(stored.Review.ID, block.ID, reviewerName, discussion, focusedThreadID, focusedCommentID)
+		view.Threads, view.ThreadAnchors = buildThreadViews(basePath, stored.Review.ID, block.ID, reviewerName, discussion, focusedThreadID, focusedCommentID)
 		chapter.Blocks = append(chapter.Blocks, view)
 	}
-	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", RepositoryName: repository.Name(), Chapter: &chapter, Notice: notice, Alert: alert}, http.StatusOK)
+	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", BasePath: basePath, RepositoryName: repository.Name(), Chapter: &chapter, Notice: notice, Alert: alert}, http.StatusOK)
 }
 
 // block renders the current chapter for a globally unique block ID.
@@ -516,7 +538,7 @@ func (a *App) block(w http.ResponseWriter, r *http.Request) {
 			if block.ID != parts[3] {
 				continue
 			}
-			a.renderChapter(w, repository, store, stored, stepIndex, block.ID, "", "", r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
+			a.renderChapter(w, repository, store, stored, requestRepositoryBasePath(r, repository), stepIndex, block.ID, "", "", r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
 			return
 		}
 	}
@@ -575,7 +597,7 @@ func (a *App) renderDiscussionReference(w http.ResponseWriter, r *http.Request, 
 		http.NotFound(w, r)
 		return
 	}
-	a.renderChapter(w, repository, store, blockLocation.Stored, blockLocation.StepIndex, blockID, focusedThreadID, focusedCommentID, r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
+	a.renderChapter(w, repository, store, blockLocation.Stored, requestRepositoryBasePath(r, repository), blockLocation.StepIndex, blockID, focusedThreadID, focusedCommentID, r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
 }
 
 // createThread persists a block or selected source-range comment from the chapter UI.
@@ -611,7 +633,7 @@ func (a *App) createThread(w http.ResponseWriter, r *http.Request) {
 		})
 		if createErr == nil {
 			if wantsTurboStream(r) && validDOMID(r.FormValue("draft_id")) {
-				view, viewErr := a.threadView(repository, store, parts[1], thread.ID)
+				view, viewErr := a.threadView(repository, store, requestRepositoryBasePath(r, repository), parts[1], thread.ID)
 				if viewErr == nil {
 					a.renderTurboStream(w, "turbo_thread_create", TurboThreadCreateView{
 						ListTargets: "[data-thread-list-for=\"" + parts[3] + "\"]",
@@ -621,7 +643,7 @@ func (a *App) createThread(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			redirect(w, r, "/reviews/"+parts[1]+"/threads/"+thread.ID, "notice", "Comment saved.")
+			redirect(w, r, requestRepositoryBasePath(r, repository)+"/reviews/"+parts[1]+"/threads/"+thread.ID, "notice", "Comment saved.")
 			return
 		}
 		err = createErr
@@ -653,13 +675,13 @@ func (a *App) createReply(w http.ResponseWriter, r *http.Request) {
 		created, replyErr := (&patchreview.DiscussionService{Store: store}).Reply(parts[1], parts[3], patchreview.NewReply{ReplyTo: r.FormValue("reply_to"), Author: r.FormValue("author"), AuthorKind: "human", Body: r.FormValue("body")})
 		if replyErr == nil {
 			if wantsTurboStream(r) {
-				view, viewErr := a.threadView(repository, store, parts[1], parts[3])
+				view, viewErr := a.threadView(repository, store, requestRepositoryBasePath(r, repository), parts[1], parts[3])
 				if viewErr == nil {
 					a.renderTurboStream(w, "turbo_thread_update", TurboThreadUpdateView{Targets: "[data-comment-thread-id=\"" + parts[3] + "\"]", Thread: view})
 					return
 				}
 			}
-			redirect(w, r, "/reviews/"+parts[1]+"/comments/"+created.ID, "notice", "Reply saved.")
+			redirect(w, r, requestRepositoryBasePath(r, repository)+"/reviews/"+parts[1]+"/comments/"+created.ID, "notice", "Reply saved.")
 			return
 		}
 		err = replyErr
@@ -698,14 +720,14 @@ func (a *App) editComment(w http.ResponseWriter, r *http.Request) {
 		location, findErr := store.FindComment(parts[1], parts[3])
 		if findErr == nil {
 			threadID := location.Discussion.Threads[location.ThreadIndex].ID
-			view, viewErr := a.threadView(repository, store, parts[1], threadID)
+			view, viewErr := a.threadView(repository, store, requestRepositoryBasePath(r, repository), parts[1], threadID)
 			if viewErr == nil {
 				a.renderTurboStream(w, "turbo_thread_update", TurboThreadUpdateView{Targets: "[data-comment-thread-id=\"" + threadID + "\"]", Thread: view})
 				return
 			}
 		}
 	}
-	redirect(w, r, "/reviews/"+parts[1]+"/comments/"+parts[3], "notice", "Comment updated.")
+	redirect(w, r, requestRepositoryBasePath(r, repository)+"/reviews/"+parts[1]+"/comments/"+parts[3], "notice", "Comment updated.")
 }
 
 // updateThreadResolution resolves or reopens one persisted discussion.
@@ -737,7 +759,7 @@ func (a *App) updateThreadResolution(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if wantsTurboStream(r) {
-		view, viewErr := a.threadView(repository, store, parts[1], parts[3])
+		view, viewErr := a.threadView(repository, store, requestRepositoryBasePath(r, repository), parts[1], parts[3])
 		if viewErr == nil {
 			a.renderTurboStream(w, "turbo_thread_update", TurboThreadUpdateView{Targets: "[data-comment-thread-id=\"" + parts[3] + "\"]", Thread: view})
 			return
@@ -747,7 +769,7 @@ func (a *App) updateThreadResolution(w http.ResponseWriter, r *http.Request) {
 	if resolved {
 		message = "Thread resolved."
 	}
-	redirect(w, r, "/reviews/"+parts[1]+"/threads/"+parts[3], "notice", message)
+	redirect(w, r, requestRepositoryBasePath(r, repository)+"/reviews/"+parts[1]+"/threads/"+parts[3], "notice", message)
 }
 
 // buildBlock joins a declarative artifact block with evidence from its recorded commits.
@@ -796,14 +818,14 @@ func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored
 }
 
 // buildThreadViews filters one discussion to a block and prepares stable UI references.
-func buildThreadViews(reviewID, blockID, reviewerName string, discussion *artifact.Discussion, focusedThreadID, focusedCommentID string) ([]ThreadView, string) {
+func buildThreadViews(basePath, reviewID, blockID, reviewerName string, discussion *artifact.Discussion, focusedThreadID, focusedCommentID string) ([]ThreadView, string) {
 	views := []ThreadView{}
 	anchors := []map[string]any{}
 	for _, thread := range discussion.Threads {
 		if thread.Target.BlockID != blockID {
 			continue
 		}
-		view := buildThreadView(reviewID, reviewerName, thread, focusedThreadID, focusedCommentID)
+		view := buildThreadView(basePath, reviewID, reviewerName, thread, focusedThreadID, focusedCommentID)
 		if thread.Target.Type == "code" {
 			anchors = append(anchors, map[string]any{"id": thread.ID, "side": thread.Target.Side, "start": thread.Target.StartLine, "end": thread.Target.EndLine})
 		}
@@ -814,7 +836,7 @@ func buildThreadViews(reviewID, blockID, reviewerName string, discussion *artifa
 }
 
 // buildThreadView maps one persisted thread into reusable page and Turbo content.
-func buildThreadView(reviewID, reviewerName string, thread artifact.Thread, focusedThreadID, focusedCommentID string) ThreadView {
+func buildThreadView(basePath, reviewID, reviewerName string, thread artifact.Thread, focusedThreadID, focusedCommentID string) ThreadView {
 	view := ThreadView{
 		ID:               thread.ID,
 		TargetType:       thread.Target.Type,
@@ -822,10 +844,10 @@ func buildThreadView(reviewID, reviewerName string, thread artifact.Thread, focu
 		TargetStartLine:  thread.Target.StartLine,
 		TargetEndLine:    thread.Target.EndLine,
 		TargetLabel:      threadTargetLabel(thread.Target),
-		ReferencePath:    "/reviews/" + reviewID + "/threads/" + thread.ID,
+		ReferencePath:    basePath + "/reviews/" + reviewID + "/threads/" + thread.ID,
 		ReferenceLabel:   "thread " + thread.ID,
-		ReplyAction:      "/reviews/" + reviewID + "/threads/" + thread.ID + "/replies",
-		ResolutionAction: "/reviews/" + reviewID + "/threads/" + thread.ID + "/resolution",
+		ReplyAction:      basePath + "/reviews/" + reviewID + "/threads/" + thread.ID + "/replies",
+		ResolutionAction: basePath + "/reviews/" + reviewID + "/threads/" + thread.ID + "/resolution",
 		ReviewerName:     reviewerName,
 		Resolved:         thread.Resolved,
 		Focused:          thread.ID == focusedThreadID,
@@ -845,8 +867,8 @@ func buildThreadView(reviewID, reviewerName string, thread artifact.Thread, focu
 			Body:           comment.Body,
 			CreatedAt:      comment.CreatedAt,
 			UpdatedAt:      comment.UpdatedAt,
-			EditAction:     "/reviews/" + reviewID + "/comments/" + comment.ID + "/edit",
-			ReferencePath:  "/reviews/" + reviewID + "/comments/" + comment.ID,
+			EditAction:     basePath + "/reviews/" + reviewID + "/comments/" + comment.ID + "/edit",
+			ReferencePath:  basePath + "/reviews/" + reviewID + "/comments/" + comment.ID,
 			ReferenceLabel: "comment " + comment.ID,
 			CanEdit:        comment.AuthorKind == "human",
 			Focused:        comment.ID == focusedCommentID,
@@ -856,7 +878,7 @@ func buildThreadView(reviewID, reviewerName string, thread artifact.Thread, focu
 }
 
 // threadView reloads one persisted thread after mutation for an inline response.
-func (a *App) threadView(repository *gitrepo.Repository, store *patchreview.Store, reviewID, threadID string) (ThreadView, error) {
+func (a *App) threadView(repository *gitrepo.Repository, store *patchreview.Store, basePath, reviewID, threadID string) (ThreadView, error) {
 	location, err := store.FindThread(reviewID, threadID)
 	if err != nil {
 		return ThreadView{}, err
@@ -865,7 +887,7 @@ func (a *App) threadView(repository *gitrepo.Repository, store *patchreview.Stor
 	if err != nil {
 		reviewerName = "Reviewer"
 	}
-	return buildThreadView(reviewID, reviewerName, location.Discussion.Threads[location.ThreadIndex], "", ""), nil
+	return buildThreadView(basePath, reviewID, reviewerName, location.Discussion.Threads[location.ThreadIndex], "", ""), nil
 }
 
 // threadTargetLabel describes an anchor without requiring the source block beside it.
@@ -906,8 +928,87 @@ func legacyBlocks(step artifact.Step) []artifact.Block {
 	return blocks
 }
 
-// currentRepository restores the selected repository from defaults or the local cookie.
+// requestWithinRepositoryScope extracts a stable repository key and normalizes the nested route.
+func requestWithinRepositoryScope(r *http.Request) (*http.Request, bool) {
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) < 2 || parts[0] != "repositories" || !validRepositoryKey(parts[1]) {
+		return r, false
+	}
+	scope := repositoryScope{Key: parts[1], BasePath: "/repositories/" + parts[1]}
+	request := r.Clone(context.WithValue(r.Context(), repositoryScopeKey{}, scope))
+	requestURL := *r.URL
+	requestURL.Path = "/"
+	if len(parts) > 2 {
+		requestURL.Path += strings.Join(parts[2:], "/")
+	}
+	request.URL = &requestURL
+	return request, true
+}
+
+// repositoryScopeFromRequest returns the path scope attached by the router.
+func repositoryScopeFromRequest(r *http.Request) repositoryScope {
+	scope, _ := r.Context().Value(repositoryScopeKey{}).(repositoryScope)
+	return scope
+}
+
+// repositoryKey derives a short stable identifier without exposing the absolute path.
+func repositoryKey(repository *gitrepo.Repository) string {
+	digest := sha256.Sum256([]byte(repository.Root()))
+	return fmt.Sprintf("%x", digest[:8])
+}
+
+// validRepositoryKey accepts the lowercase hexadecimal keys generated by repositoryKey.
+func validRepositoryKey(value string) bool {
+	if len(value) != 16 {
+		return false
+	}
+	for _, character := range value {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// repositoryBasePath returns the URL namespace for one canonical repository.
+func repositoryBasePath(repository *gitrepo.Repository) string {
+	return "/repositories/" + repositoryKey(repository)
+}
+
+// requestRepositoryBasePath preserves the validated request scope or derives its canonical value.
+func requestRepositoryBasePath(r *http.Request, repository *gitrepo.Repository) string {
+	scope := repositoryScopeFromRequest(r)
+	if scope.Key == repositoryKey(repository) {
+		return scope.BasePath
+	}
+	return repositoryBasePath(repository)
+}
+
+// scopedRepositoryCookieName gives each repository selection an independent browser cookie.
+func scopedRepositoryCookieName(key string) string {
+	return repositoryCookie + "_" + key
+}
+
+// currentRepository restores the repository addressed by the URL or the legacy default.
 func (a *App) currentRepository(r *http.Request) (*gitrepo.Repository, error) {
+	scope := repositoryScopeFromRequest(r)
+	if scope.Key != "" {
+		if cookie, err := r.Cookie(scopedRepositoryCookieName(scope.Key)); err == nil {
+			if decoded, decodeErr := base64.RawURLEncoding.DecodeString(cookie.Value); decodeErr == nil {
+				repository, openErr := gitrepo.Open(string(decoded))
+				if openErr == nil && repositoryKey(repository) == scope.Key {
+					return repository, nil
+				}
+			}
+		}
+		if a.defaultRepository != "" {
+			repository, err := gitrepo.Open(a.defaultRepository)
+			if err == nil && repositoryKey(repository) == scope.Key {
+				return repository, nil
+			}
+		}
+		return nil, fmt.Errorf("repository selection is unavailable; open the repository again")
+	}
 	path := a.defaultRepository
 	if cookie, err := r.Cookie(repositoryCookie); err == nil {
 		if decoded, decodeErr := base64.RawURLEncoding.DecodeString(cookie.Value); decodeErr == nil {
@@ -980,14 +1081,20 @@ func (a *App) securityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "same-origin")
 }
 
-// setRepositoryCookie stores an encoded local path without exposing it to scripts.
-func setRepositoryCookie(w http.ResponseWriter, path string) {
-	http.SetCookie(w, &http.Cookie{Name: repositoryCookie, Value: base64.RawURLEncoding.EncodeToString([]byte(path)), Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
+// setScopedRepositoryCookie stores one path under the repository-specific URL namespace.
+func setScopedRepositoryCookie(w http.ResponseWriter, repository *gitrepo.Repository) {
+	key := repositoryKey(repository)
+	http.SetCookie(w, &http.Cookie{Name: scopedRepositoryCookieName(key), Value: base64.RawURLEncoding.EncodeToString([]byte(repository.Root())), Path: repositoryBasePath(repository), HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }
 
-// clearRepositoryCookie expires the current local repository selection.
-func clearRepositoryCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{Name: repositoryCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+// clearRepositoryCookie expires either one scoped selection or the legacy global selection.
+func clearRepositoryCookie(w http.ResponseWriter, key string) {
+	name, path := repositoryCookie, "/"
+	if key != "" {
+		name = scopedRepositoryCookieName(key)
+		path = "/repositories/" + key
+	}
+	http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: path, MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }
 
 // redirect appends a short flash message and sends a See Other response.

@@ -14,6 +14,11 @@ services:
     command: ["patchflow", "serve", "--addr", "0.0.0.0:3000"]
     volumes:
       - ${HOME}/Projects:/workspace
+      - ${PATCHFLOW_WORKTREES_PATH:-${HOME}/.herdr/worktrees}:/workspace/worktrees
+      # Linked worktree metadata contains absolute host paths. Mirror both roots
+      # at their original locations so Git can follow those internal pointers.
+      - ${HOME}/Projects:${HOME}/Projects
+      - ${PATCHFLOW_WORKTREES_PATH:-${HOME}/.herdr/worktrees}:${PATCHFLOW_WORKTREES_PATH:-${HOME}/.herdr/worktrees}
       - ${PATCHFLOW_GIT_CONFIG_PATH:-${HOME}/.config/git/config}:/home/patchflow/.config/git/config:ro
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://localhost:3000/up > /dev/null"]

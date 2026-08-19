@@ -32,12 +32,12 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 	location := created.Header().Get("Location")
 	reviewPath := strings.Split(location, "?")[0]
-	if !strings.HasPrefix(reviewPath, "/reviews/") {
+	if !strings.HasPrefix(reviewPath, "/repositories/") || !strings.Contains(reviewPath, "/reviews/") {
 		t.Fatalf("unexpected redirect %q", location)
 	}
 
 	overview := perform(app, http.MethodGet, reviewPath, "")
-	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") {
+	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/steps/domain\"") {
 		t.Fatalf("unexpected overview: %d %s", overview.Code, overview.Body.String())
 	}
 
@@ -47,7 +47,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 			t.Errorf("chapter missing %q", expected)
 		}
 	}
-	for _, expected := range []string{"aria-label=\"Comment on block domain-intro\"", "title=\"Add comment\"", "popover=\"manual\"", "data-comment-thread-target=\"composerTemplate\"", "name=\"author\" value=\"Patchflow Test\""} {
+	for _, expected := range []string{"aria-label=\"Comment on block domain-intro\"", "title=\"Add comment\"", "popover=\"manual\"", "data-comment-thread-target=\"composerTemplate\"", "name=\"author\" value=\"Patchflow Test\"", "action=\"" + reviewPath + "/blocks/domain-intro/threads\""} {
 		if !strings.Contains(chapter.Body.String(), expected) {
 			t.Errorf("chapter comment action missing %q", expected)
 		}
@@ -125,7 +125,7 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 	}
 	created := perform(app, http.MethodPost, "/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
 	reviewPath := strings.Split(created.Header().Get("Location"), "?")[0]
-	reviewID := strings.TrimPrefix(reviewPath, "/reviews/")
+	reviewID := reviewIDFromPath(reviewPath)
 
 	opening := performTurbo(app, http.MethodPost, reviewPath+"/blocks/domain-intro/threads", url.Values{
 		"target_type": {"block"}, "author": {"Patchflow Test"}, "body": {"Please explain this boundary."}, "draft_id": {"comment-draft-test"},
@@ -221,6 +221,54 @@ func TestRepositoryPickerListsGitRepositoriesAndRejectsEscapes(t *testing.T) {
 	}
 }
 
+// TestAppKeepsRepositoryTabsIndependent verifies URL-scoped selection across projects.
+func TestAppKeepsRepositoryTabsIndependent(t *testing.T) {
+	firstRepository := featureRepository(t)
+	secondRepository := featureRepository(t)
+	app, err := NewApp("", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstOpen := perform(app, http.MethodPost, "/repository", url.Values{"repository_path": {firstRepository}}.Encode())
+	secondOpen := perform(app, http.MethodPost, "/repository", url.Values{"repository_path": {secondRepository}}.Encode())
+	firstPath := strings.Split(firstOpen.Header().Get("Location"), "?")[0]
+	secondPath := strings.Split(secondOpen.Header().Get("Location"), "?")[0]
+	firstBase := strings.TrimSuffix(firstPath, "/reviews/new")
+	secondBase := strings.TrimSuffix(secondPath, "/reviews/new")
+	firstCookies := firstOpen.Result().Cookies()
+	secondCookies := secondOpen.Result().Cookies()
+	if len(firstCookies) != 1 || len(secondCookies) != 1 {
+		t.Fatalf("repository opens did not issue scoped cookies: %v %v", firstCookies, secondCookies)
+	}
+	if firstBase == secondBase || firstCookies[0].Name == secondCookies[0].Name {
+		t.Fatalf("repositories share URL or cookie identity: %q %q", firstBase, secondBase)
+	}
+	if strings.Contains(firstBase, firstRepository) || strings.Contains(secondBase, secondRepository) {
+		t.Fatal("scoped URLs must not expose absolute repository paths")
+	}
+
+	firstHome := performWithCookie(app, http.MethodGet, firstBase, "", firstCookies[0])
+	secondHome := performWithCookie(app, http.MethodGet, secondBase, "", secondCookies[0])
+	if firstHome.Code != http.StatusOK || !strings.Contains(firstHome.Body.String(), firstRepository) {
+		t.Fatalf("first repository tab lost its context: %d %s", firstHome.Code, firstHome.Body.String())
+	}
+	if secondHome.Code != http.StatusOK || !strings.Contains(secondHome.Body.String(), secondRepository) {
+		t.Fatalf("second repository tab lost its context: %d %s", secondHome.Code, secondHome.Body.String())
+	}
+
+	wrongCookie := performWithCookie(app, http.MethodGet, firstBase+"/reviews/new", "", secondCookies[0])
+	if wrongCookie.Code != http.StatusSeeOther || !strings.HasPrefix(wrongCookie.Header().Get("Location"), "/?alert=") {
+		t.Fatalf("repository scope accepted another tab's cookie: %d %q", wrongCookie.Code, wrongCookie.Header().Get("Location"))
+	}
+
+	firstReview := performWithCookie(app, http.MethodPost, firstBase+"/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode(), firstCookies[0])
+	secondReview := performWithCookie(app, http.MethodPost, secondBase+"/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode(), secondCookies[0])
+	if !strings.HasPrefix(firstReview.Header().Get("Location"), firstBase+"/reviews/") || !strings.HasPrefix(secondReview.Header().Get("Location"), secondBase+"/reviews/") {
+		t.Fatalf("review redirects escaped their repository scopes: %q %q", firstReview.Header().Get("Location"), secondReview.Header().Get("Location"))
+	}
+}
+
 // TestBrowseDirectoriesSkipsSymlinksOutsideRoot hides children that resolve beyond the browse root.
 func TestBrowseDirectoriesSkipsSymlinksOutsideRoot(t *testing.T) {
 	root := t.TempDir()
@@ -234,6 +282,27 @@ func TestBrowseDirectoriesSkipsSymlinksOutsideRoot(t *testing.T) {
 	}
 	if len(view.Entries) != 0 {
 		t.Fatalf("expected outside symlink to be hidden, got %#v", view.Entries)
+	}
+}
+
+// TestBrowseDirectoriesListsGitWorktrees accepts the .git file used by linked worktrees.
+func TestBrowseDirectoriesListsGitWorktrees(t *testing.T) {
+	root := t.TempDir()
+	worktreeGroup := filepath.Join(root, "worktrees", "project")
+	worktree := filepath.Join(worktreeGroup, "feature-branch")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: /tmp/example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := browseDirectories(root, worktreeGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Entries) != 1 || view.Entries[0].Path != worktree || !view.Entries[0].IsRepository {
+		t.Fatalf("linked worktree is not selectable: %#v", view.Entries)
 	}
 }
 
@@ -330,6 +399,25 @@ func performTurbo(handler http.Handler, method, path, body string) *httptest.Res
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
+}
+
+// performWithCookie sends one request with a repository-scoped browser cookie.
+func performWithCookie(handler http.Handler, method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+// reviewIDFromPath extracts the final review resource segment from a scoped URL.
+func reviewIDFromPath(reviewPath string) string {
+	parts := strings.Split(strings.Trim(reviewPath, "/"), "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[len(parts)-1]
 }
 
 // featureRepository creates a small two-commit repository used by HTTP flows.

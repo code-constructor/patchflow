@@ -13,7 +13,7 @@
   </head>
   <body>
     <header class="site-header">
-      <a href="/" class="brand"><span class="brand-mark">P</span><span>Patchflow</span></a>
+      <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}" class="brand"><span class="brand-mark">P</span><span>Patchflow</span></a>
       {{if .RepositoryName}}<span class="repository-chip">{{.RepositoryName}}</span>{{end}}
     </header>
     <main class="page-shell">

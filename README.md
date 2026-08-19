@@ -171,9 +171,34 @@ Patchflow is then available at <http://patchflow.localhost>. No host port is
 claimed by the application container; Traefik discovers it from Compose labels.
 
 The host's `$HOME/Projects` directory is mounted at `/workspace`, allowing
-Patchflow to review local projects. For example, host project
-`$HOME/Projects/example` is selected in the container UI as
-`/workspace/example`.
+Patchflow to review local projects. Herdr worktrees from `$HOME/.herdr/worktrees`
+are mounted at `/workspace/worktrees` as well. Override that source when needed:
+
+```sh
+PATCHFLOW_WORKTREES_PATH=/another/worktree/root docker compose up --build
+```
+
+Any number of additional repository roots can be mounted beneath `/workspace`.
+Copy `compose.mounts.example.yaml` to the Git-ignored `compose.override.yaml`,
+then add one named target per host directory:
+
+```yaml
+services:
+  app:
+    volumes:
+      - /host/client-projects:/workspace/client-projects
+      - /host/other-worktrees:/workspace/other-worktrees
+      # Required when linked-worktree metadata points at these host paths:
+      - /host/client-projects:/host/client-projects
+      - /host/other-worktrees:/host/other-worktrees
+```
+
+For example, `$HOME/Projects/example` is selected as `/workspace/example`, while
+a Herdr worktree appears below `/workspace/worktrees`.
+Linked Git worktrees store absolute paths in their `.git` metadata. The default
+Compose setup therefore mirrors both standard roots at their original host
+paths inside the container as well. Additional worktree mounts should follow
+the same two-mount pattern shown above.
 
 The Compose setup also mounts the host's XDG Git configuration read-only so
 comment forms can use `git config user.name`. If your global Git configuration
@@ -187,6 +212,12 @@ The **Browse…** button opens a server-side repository picker rooted at
 `/workspace`, so container paths do not need to be entered by hand. In local
 development the picker starts beside the preselected repository or in the
 user's `Projects` directory.
+
+Each opened repository receives a short URL namespace such as
+`/repositories/4a1f…/reviews/<review-id>`. The absolute local path remains in an
+HttpOnly cookie scoped to that namespace. Tabs can therefore keep reviews from
+different projects open concurrently without changing one another's repository
+selection.
 
 The image runs as UID and GID `1000` by default so review artifacts remain owned
 by the developer. Override these values on systems with different IDs:

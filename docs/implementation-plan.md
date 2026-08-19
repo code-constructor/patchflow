@@ -26,7 +26,9 @@ virtualization, and multi-user review are later work.
 ## Architecture boundaries
 
 - The review artifact is the source of truth. Patchflow has no application
-  database; repository selection is a local browser cookie.
+  database; a short repository identity lives in the URL path while its local
+  path stays in an HttpOnly cookie scoped to that identity. Multiple repository
+  reviews can therefore remain open independently.
 - Git commands live behind a service boundary and receive argument arrays, not
   shell-interpolated commands.
 - Refs resolve to SHAs before diffing. Artifacts never silently follow a moving
