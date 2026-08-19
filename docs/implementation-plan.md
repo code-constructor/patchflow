@@ -27,9 +27,10 @@ virtualization, and multi-user review are later work.
 
 - The review artifact is the source of truth. Patchflow has no application
   database; a short repository identity lives in the URL path while its local
-  path stays in an identity-specific HttpOnly cookie. Multiple repository
-  reviews can therefore remain open independently. The root dashboard rebuilds
-  its list of open repositories from those cookies and remains the navigation
+  path and last-opened time live in a versioned, atomic user configuration under
+  the operating system's config directory. Multiple repository reviews can
+  therefore remain open independently across tabs, browsers, and restarts. The
+  root dashboard rebuilds its list from that file and remains the navigation
   point for opening additional work.
 - Git commands live behind a service boundary and receive argument arrays, not
   shell-interpolated commands.

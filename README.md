@@ -214,12 +214,40 @@ development the picker starts beside the preselected repository or in the
 user's `Projects` directory.
 
 Each opened repository receives a short URL namespace such as
-`/repositories/4a1f…/reviews/<review-id>`. The absolute local path remains in an
-repository-specific HttpOnly cookie. Tabs can therefore keep reviews from
-different projects open concurrently without changing one another's repository
-selection. The root page lists all reachable repositories remembered by those
-cookies beneath the picker, and every repository page links back to that
-workspace overview.
+`/repositories/4a1f…/reviews/<review-id>`. The absolute local path remains in a
+versioned user configuration rather than the URL or browser session. Native
+execution uses `$XDG_CONFIG_HOME/patchflow/config.json` (normally
+`~/.config/patchflow/config.json`). The Docker development setup uses
+`/workspace/.patchflow/config.json`, persisted on the host as
+`$HOME/Projects/.patchflow/config.json`; override the container path with
+`PATCHFLOW_DOCKER_CONFIG_PATH` when required.
+
+Tabs and even separate browsers can therefore keep reviews from different
+projects open concurrently. The root page lists all reachable repositories
+remembered by that configuration beneath the picker, and every repository page
+links back to the workspace overview. Existing repository cookies from earlier
+Patchflow versions are imported into the file on first use.
+
+The settings document starts with repository history and is intentionally
+extensible for future preferences:
+
+```json
+{
+  "version": 1,
+  "repositories": [
+    {
+      "path": "/workspace/example",
+      "last_opened_at": "2026-08-19T12:00:00Z"
+    }
+  ]
+}
+```
+
+An explicit path is also available outside Docker:
+
+```sh
+patchflow serve --config /path/to/config.json
+```
 
 The image runs as UID and GID `1000` by default so review artifacts remain owned
 by the developer. Override these values on systems with different IDs:

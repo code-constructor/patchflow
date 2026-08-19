@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,10 +17,7 @@ import (
 // TestAppRunsRepositoryToChapterFlow exercises repository selection through chapter rendering.
 func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	repository := featureRepository(t)
-	app, err := NewApp(repository, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	app := newTestApp(t, repository)
 
 	home := perform(app, http.MethodGet, "/", "")
 	if home.Code != http.StatusOK || !strings.Contains(home.Body.String(), "Open repositories") || !strings.Contains(home.Body.String(), repository) {
@@ -119,10 +117,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 // TestAppPersistsAddressableBlockCodeAndReplyComments exercises the browser discussion flow.
 func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 	repository := featureRepository(t)
-	app, err := NewApp(repository, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	app := newTestApp(t, repository)
 	created := perform(app, http.MethodPost, "/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
 	reviewPath := strings.Split(created.Header().Get("Location"), "?")[0]
 	reviewID := reviewIDFromPath(reviewPath)
@@ -200,10 +195,7 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 // TestRepositoryPickerListsGitRepositoriesAndRejectsEscapes covers picker discovery and containment.
 func TestRepositoryPickerListsGitRepositoriesAndRejectsEscapes(t *testing.T) {
 	repository := featureRepository(t)
-	app, err := NewApp(repository, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	app := newTestApp(t, repository)
 
 	response := perform(app, http.MethodGet, "/repository-picker?path="+url.QueryEscape(app.browseRoot), "")
 	if response.Code != http.StatusOK {
@@ -225,7 +217,8 @@ func TestRepositoryPickerListsGitRepositoriesAndRejectsEscapes(t *testing.T) {
 func TestAppKeepsRepositoryTabsIndependent(t *testing.T) {
 	firstRepository := featureRepository(t)
 	secondRepository := featureRepository(t)
-	app, err := NewApp("", nil)
+	settingsPath := filepath.Join(t.TempDir(), "patchflow", "config.json")
+	app, err := newApp("", settingsPath, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,45 +229,73 @@ func TestAppKeepsRepositoryTabsIndependent(t *testing.T) {
 	secondPath := strings.Split(secondOpen.Header().Get("Location"), "?")[0]
 	firstBase := strings.TrimSuffix(firstPath, "/reviews/new")
 	secondBase := strings.TrimSuffix(secondPath, "/reviews/new")
-	firstCookies := firstOpen.Result().Cookies()
-	secondCookies := secondOpen.Result().Cookies()
-	if len(firstCookies) != 1 || len(secondCookies) != 1 {
-		t.Fatalf("repository opens did not issue scoped cookies: %v %v", firstCookies, secondCookies)
+	if len(firstOpen.Result().Cookies()) != 0 || len(secondOpen.Result().Cookies()) != 0 {
+		t.Fatal("repository selection must not depend on new browser cookies")
 	}
-	if firstCookies[0].Path != "/" || secondCookies[0].Path != "/" {
-		t.Fatalf("repository cookies are not visible to the dashboard: %q %q", firstCookies[0].Path, secondCookies[0].Path)
-	}
-	if firstBase == secondBase || firstCookies[0].Name == secondCookies[0].Name {
-		t.Fatalf("repositories share URL or cookie identity: %q %q", firstBase, secondBase)
+	if firstBase == secondBase {
+		t.Fatalf("repositories share URL identity: %q %q", firstBase, secondBase)
 	}
 	if strings.Contains(firstBase, firstRepository) || strings.Contains(secondBase, secondRepository) {
 		t.Fatal("scoped URLs must not expose absolute repository paths")
 	}
 
-	firstHome := performWithCookie(app, http.MethodGet, firstBase, "", firstCookies[0])
-	secondHome := performWithCookie(app, http.MethodGet, secondBase, "", secondCookies[0])
+	firstHome := perform(app, http.MethodGet, firstBase, "")
+	secondHome := perform(app, http.MethodGet, secondBase, "")
 	if firstHome.Code != http.StatusOK || !strings.Contains(firstHome.Body.String(), firstRepository) {
 		t.Fatalf("first repository tab lost its context: %d %s", firstHome.Code, firstHome.Body.String())
 	}
 	if secondHome.Code != http.StatusOK || !strings.Contains(secondHome.Body.String(), secondRepository) {
 		t.Fatalf("second repository tab lost its context: %d %s", secondHome.Code, secondHome.Body.String())
 	}
-	dashboard := performWithCookies(app, http.MethodGet, "/", "", firstCookies[0], secondCookies[0])
+	restarted, err := newApp("", settingsPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard := perform(restarted, http.MethodGet, "/", "")
 	for _, expected := range []string{firstRepository, secondRepository, firstBase, secondBase, "Open repositories"} {
 		if !strings.Contains(dashboard.Body.String(), expected) {
 			t.Errorf("repository dashboard is missing %q", expected)
 		}
 	}
 
-	wrongCookie := performWithCookie(app, http.MethodGet, firstBase+"/reviews/new", "", secondCookies[0])
-	if wrongCookie.Code != http.StatusSeeOther || !strings.HasPrefix(wrongCookie.Header().Get("Location"), "/?alert=") {
-		t.Fatalf("repository scope accepted another tab's cookie: %d %q", wrongCookie.Code, wrongCookie.Header().Get("Location"))
-	}
-
-	firstReview := performWithCookie(app, http.MethodPost, firstBase+"/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode(), firstCookies[0])
-	secondReview := performWithCookie(app, http.MethodPost, secondBase+"/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode(), secondCookies[0])
+	firstReview := perform(restarted, http.MethodPost, firstBase+"/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
+	secondReview := perform(restarted, http.MethodPost, secondBase+"/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
 	if !strings.HasPrefix(firstReview.Header().Get("Location"), firstBase+"/reviews/") || !strings.HasPrefix(secondReview.Header().Get("Location"), secondBase+"/reviews/") {
 		t.Fatalf("review redirects escaped their repository scopes: %q %q", firstReview.Header().Get("Location"), secondReview.Header().Get("Location"))
+	}
+	closed := perform(restarted, http.MethodPost, firstBase+"/repository/close", "")
+	if closed.Code != http.StatusSeeOther {
+		t.Fatalf("closing repository returned %d", closed.Code)
+	}
+	afterClose := perform(restarted, http.MethodGet, "/", "")
+	if strings.Contains(afterClose.Body.String(), firstRepository) || !strings.Contains(afterClose.Body.String(), secondRepository) {
+		t.Fatalf("closing one repository changed the wrong dashboard entries: %s", afterClose.Body.String())
+	}
+}
+
+// TestAppMigratesLegacyRepositoryCookie persists selections from earlier browser sessions.
+func TestAppMigratesLegacyRepositoryCookie(t *testing.T) {
+	repository := featureRepository(t)
+	settingsPath := filepath.Join(t.TempDir(), "patchflow", "config.json")
+	app, err := newApp("", settingsPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{Name: repositoryCookie, Value: base64.RawURLEncoding.EncodeToString([]byte(repository))})
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), repository) {
+		t.Fatalf("legacy cookie was not shown during migration: %d %s", response.Code, response.Body.String())
+	}
+
+	restarted, err := newApp("", settingsPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted := perform(restarted, http.MethodGet, "/", "")
+	if !strings.Contains(persisted.Body.String(), repository) {
+		t.Fatal("legacy cookie selection did not survive without the browser cookie")
 	}
 }
 
@@ -340,7 +361,7 @@ func TestAppRendersLegacyV1AsChapterBlocks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(reviewDirectory, "overview.md"), []byte("# Legacy review\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	app, _ := NewApp(repository, nil)
+	app := newTestApp(t, repository)
 	response := perform(app, http.MethodGet, "/reviews/20260818-153000-a1b2c3d4/steps/domain-model", "")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "diff-viewer") {
 		t.Fatalf("legacy chapter failed: %d %s", response.Code, response.Body.String())
@@ -410,23 +431,6 @@ func performTurbo(handler http.Handler, method, path, body string) *httptest.Res
 	return response
 }
 
-// performWithCookie sends one request with a repository-scoped browser cookie.
-func performWithCookie(handler http.Handler, method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
-	return performWithCookies(handler, method, path, body, cookie)
-}
-
-// performWithCookies sends one request with repository-specific browser cookies.
-func performWithCookies(handler http.Handler, method, path, body string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(method, path, strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	for _, cookie := range cookies {
-		request.AddCookie(cookie)
-	}
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, request)
-	return response
-}
-
 // reviewIDFromPath extracts the final review resource segment from a scoped URL.
 func reviewIDFromPath(reviewPath string) string {
 	parts := strings.Split(strings.Trim(reviewPath, "/"), "/")
@@ -434,6 +438,16 @@ func reviewIDFromPath(reviewPath string) string {
 		return ""
 	}
 	return parts[len(parts)-1]
+}
+
+// newTestApp creates an application with settings isolated from the developer's home.
+func newTestApp(t *testing.T, defaultRepository string) *App {
+	t.Helper()
+	app, err := newApp(defaultRepository, filepath.Join(t.TempDir(), "patchflow", "config.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return app
 }
 
 // featureRepository creates a small two-commit repository used by HTTP flows.

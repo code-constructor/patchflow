@@ -15,13 +15,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/traqx-ai/patchflow/internal/artifact"
 	"github.com/traqx-ai/patchflow/internal/gitrepo"
 	patchreview "github.com/traqx-ai/patchflow/internal/review"
+	patchsettings "github.com/traqx-ai/patchflow/internal/settings"
 )
 
 //go:embed templates/*.html assets
@@ -43,6 +43,7 @@ type App struct {
 	assets            http.Handler
 	defaultRepository string
 	browseRoot        string
+	settings          *patchsettings.Store
 	logger            *slog.Logger
 }
 
@@ -205,6 +206,16 @@ type DirectoryView struct {
 
 // NewApp parses embedded templates and assembles the local HTTP application.
 func NewApp(defaultRepository string, logger *slog.Logger) (*App, error) {
+	return newApp(defaultRepository, "", logger)
+}
+
+// NewAppWithSettings assembles the application with an explicit settings file path.
+func NewAppWithSettings(defaultRepository, settingsPath string, logger *slog.Logger) (*App, error) {
+	return newApp(defaultRepository, settingsPath, logger)
+}
+
+// newApp assembles the application with an injectable settings path for isolated tests.
+func newApp(defaultRepository, settingsPath string, logger *slog.Logger) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -242,7 +253,18 @@ func NewApp(defaultRepository string, logger *slog.Logger) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &App{templates: templates, assets: http.StripPrefix("/assets/", http.FileServer(http.FS(assetFS))), defaultRepository: defaultRepository, browseRoot: discoverBrowseRoot(defaultRepository), logger: logger}, nil
+	settingsStore, err := patchsettings.NewStore(settingsPath)
+	if err != nil {
+		return nil, err
+	}
+	if defaultRepository != "" {
+		if repository, openErr := gitrepo.Open(defaultRepository); openErr == nil {
+			if rememberErr := settingsStore.Remember(repository.Root()); rememberErr != nil {
+				return nil, rememberErr
+			}
+		}
+	}
+	return &App{templates: templates, assets: http.StripPrefix("/assets/", http.FileServer(http.FS(assetFS))), defaultRepository: defaultRepository, browseRoot: discoverBrowseRoot(defaultRepository), settings: settingsStore, logger: logger}, nil
 }
 
 // ServeHTTP applies security headers and dispatches Patchflow's small route set.
@@ -306,14 +328,17 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	page := Page{Title: "Patchflow · Understand the change", RepositoryPath: a.defaultRepository, PickerRoot: a.browseRoot, Notice: r.URL.Query().Get("notice"), Alert: r.URL.Query().Get("alert")}
 	if repositoryScopeFromRequest(r).Key == "" {
-		page.Repositories = a.activeRepositories(r)
+		var settingsErr error
+		page.Repositories, settingsErr = a.activeRepositories(r)
+		if settingsErr != nil {
+			page.Alert = settingsErr.Error()
+		}
 		a.render(w, "home", page, http.StatusOK)
 		return
 	}
 	repository, err := a.currentRepository(r)
 	if err == nil && repository != nil {
 		page.BasePath = repositoryBasePath(repository)
-		setScopedRepositoryCookie(w, repository)
 		page.Repository = &RepositoryView{Name: repository.Name(), Path: repository.Root(), BasePath: page.BasePath}
 		page.RepositoryName = repository.Name()
 		page.Title = repository.Name() + " · Patchflow"
@@ -332,7 +357,6 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if err != nil {
 		page.Alert = err.Error()
-		clearRepositoryCookie(w, repositoryScopeFromRequest(r).Key)
 	}
 	a.render(w, "home", page, http.StatusOK)
 }
@@ -359,13 +383,24 @@ func (a *App) openRepository(w http.ResponseWriter, r *http.Request) {
 		a.render(w, "home", Page{Title: "Patchflow", RepositoryPath: r.FormValue("repository_path"), Alert: err.Error()}, http.StatusUnprocessableEntity)
 		return
 	}
-	setScopedRepositoryCookie(w, repository)
+	if err := a.settings.Remember(repository.Root()); err != nil {
+		a.render(w, "home", Page{Title: "Patchflow", RepositoryPath: r.FormValue("repository_path"), Alert: err.Error()}, http.StatusUnprocessableEntity)
+		return
+	}
 	redirect(w, r, repositoryBasePath(repository)+"/reviews/new", "notice", "Opened "+repository.Name()+".")
 }
 
 // closeRepository forgets the local repository selection and returns home.
 func (a *App) closeRepository(w http.ResponseWriter, r *http.Request) {
+	repository, err := a.currentRepository(r)
+	if err == nil && repository != nil {
+		err = a.settings.Forget(repository.Root())
+	}
 	clearRepositoryCookie(w, repositoryScopeFromRequest(r).Key)
+	if err != nil {
+		redirect(w, r, "/", "alert", err.Error())
+		return
+	}
 	redirect(w, r, "/", "notice", "Repository closed.")
 }
 
@@ -998,17 +1033,53 @@ func scopedRepositoryCookieName(key string) string {
 	return repositoryCookie + "_" + key
 }
 
-// activeRepositories restores all valid repository selections visible to the dashboard.
-func (a *App) activeRepositories(r *http.Request) []RepositoryView {
-	repositories := map[string]*gitrepo.Repository{}
-	addPath := func(path string) {
-		repository, err := gitrepo.Open(path)
-		if err == nil {
-			repositories[repositoryKey(repository)] = repository
+// activeRepositories restores reachable repository selections from persistent settings.
+func (a *App) activeRepositories(r *http.Request) ([]RepositoryView, error) {
+	if err := a.migrateRepositoryCookies(r); err != nil {
+		return nil, err
+	}
+	configured, err := a.settings.Repositories()
+	if err != nil {
+		return nil, err
+	}
+	views := make([]RepositoryView, 0, len(configured))
+	for _, saved := range configured {
+		repository, openErr := gitrepo.Open(saved.Path)
+		if openErr != nil {
+			continue
+		}
+		views = append(views, repositoryView(repository))
+	}
+	return views, nil
+}
+
+// repositoryView builds one dashboard entry and its current review count.
+func repositoryView(repository *gitrepo.Repository) RepositoryView {
+	reviewLabel := "No reviews"
+	if store, err := patchreview.NewStore(repository.Root(), nil); err == nil {
+		if reviews, allErr := store.All(); allErr == nil {
+			switch len(reviews) {
+			case 1:
+				reviewLabel = "1 review"
+			default:
+				if len(reviews) > 1 {
+					reviewLabel = fmt.Sprintf("%d reviews", len(reviews))
+				}
+			}
 		}
 	}
-	if a.defaultRepository != "" {
-		addPath(a.defaultRepository)
+	return RepositoryView{Name: repository.Name(), Path: repository.Root(), BasePath: repositoryBasePath(repository), ReviewLabel: reviewLabel}
+}
+
+// migrateRepositoryCookies imports selections created by cookie-based Patchflow versions.
+func (a *App) migrateRepositoryCookies(r *http.Request) error {
+	configured, err := a.settings.Repositories()
+	if err != nil {
+		return err
+	}
+	known := map[string]bool{}
+	for _, repository := range configured {
+		known[filepath.Clean(repository.Path)] = true
 	}
 	for _, cookie := range r.Cookies() {
 		key := ""
@@ -1022,66 +1093,46 @@ func (a *App) activeRepositories(r *http.Request) []RepositoryView {
 		default:
 			continue
 		}
-		decoded, err := base64.RawURLEncoding.DecodeString(cookie.Value)
-		if err != nil {
+		decoded, decodeErr := base64.RawURLEncoding.DecodeString(cookie.Value)
+		if decodeErr != nil {
 			continue
 		}
-		repository, err := gitrepo.Open(string(decoded))
-		if err != nil || (key != "" && repositoryKey(repository) != key) {
+		repository, openErr := gitrepo.Open(string(decoded))
+		if openErr != nil || (key != "" && repositoryKey(repository) != key) || known[repository.Root()] {
 			continue
 		}
-		repositories[repositoryKey(repository)] = repository
-	}
-
-	views := make([]RepositoryView, 0, len(repositories))
-	for _, repository := range repositories {
-		reviewLabel := "No reviews"
-		if store, err := patchreview.NewStore(repository.Root(), nil); err == nil {
-			if reviews, allErr := store.All(); allErr == nil {
-				switch len(reviews) {
-				case 1:
-					reviewLabel = "1 review"
-				default:
-					if len(reviews) > 1 {
-						reviewLabel = fmt.Sprintf("%d reviews", len(reviews))
-					}
-				}
-			}
+		if err := a.settings.Remember(repository.Root()); err != nil {
+			return err
 		}
-		views = append(views, RepositoryView{Name: repository.Name(), Path: repository.Root(), BasePath: repositoryBasePath(repository), ReviewLabel: reviewLabel})
+		known[repository.Root()] = true
 	}
-	sort.Slice(views, func(left, right int) bool {
-		if views[left].Name == views[right].Name {
-			return views[left].Path < views[right].Path
-		}
-		return views[left].Name < views[right].Name
-	})
-	return views
+	return nil
 }
 
-// currentRepository restores the repository addressed by the URL or the legacy default.
+// currentRepository restores the repository addressed by the URL from persistent settings.
 func (a *App) currentRepository(r *http.Request) (*gitrepo.Repository, error) {
 	scope := repositoryScopeFromRequest(r)
 	if scope.Key != "" {
-		if cookie, err := r.Cookie(scopedRepositoryCookieName(scope.Key)); err == nil {
-			if decoded, decodeErr := base64.RawURLEncoding.DecodeString(cookie.Value); decodeErr == nil {
-				repository, openErr := gitrepo.Open(string(decoded))
-				if openErr == nil && repositoryKey(repository) == scope.Key {
-					return repository, nil
-				}
+		configured, err := a.settings.Repositories()
+		if err != nil {
+			return nil, err
+		}
+		for _, saved := range configured {
+			repository, openErr := gitrepo.Open(saved.Path)
+			if openErr == nil && repositoryKey(repository) == scope.Key {
+				return repository, nil
 			}
 		}
-		if cookie, err := r.Cookie(repositoryCookie); err == nil {
-			if decoded, decodeErr := base64.RawURLEncoding.DecodeString(cookie.Value); decodeErr == nil {
-				repository, openErr := gitrepo.Open(string(decoded))
-				if openErr == nil && repositoryKey(repository) == scope.Key {
-					return repository, nil
-				}
-			}
+		if err := a.migrateRepositoryCookies(r); err != nil {
+			return nil, err
 		}
-		if a.defaultRepository != "" {
-			repository, err := gitrepo.Open(a.defaultRepository)
-			if err == nil && repositoryKey(repository) == scope.Key {
+		configured, err = a.settings.Repositories()
+		if err != nil {
+			return nil, err
+		}
+		for _, saved := range configured {
+			repository, openErr := gitrepo.Open(saved.Path)
+			if openErr == nil && repositoryKey(repository) == scope.Key {
 				return repository, nil
 			}
 		}
@@ -1110,7 +1161,6 @@ func (a *App) requireRepository(w http.ResponseWriter, r *http.Request) (*gitrep
 		redirect(w, r, "/", "alert", message)
 		return nil, false
 	}
-	setScopedRepositoryCookie(w, repository)
 	return repository, true
 }
 
@@ -1160,20 +1210,12 @@ func (a *App) securityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "same-origin")
 }
 
-// setScopedRepositoryCookie stores one path under its repository-specific cookie name.
-func setScopedRepositoryCookie(w http.ResponseWriter, repository *gitrepo.Repository) {
-	key := repositoryKey(repository)
-	http.SetCookie(w, &http.Cookie{Name: scopedRepositoryCookieName(key), Value: base64.RawURLEncoding.EncodeToString([]byte(repository.Root())), Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
-}
-
-// clearRepositoryCookie expires either one scoped selection or the legacy global selection.
+// clearRepositoryCookie expires legacy cookies after a repository is forgotten.
 func clearRepositoryCookie(w http.ResponseWriter, key string) {
-	name := repositoryCookie
+	http.SetCookie(w, &http.Cookie{Name: repositoryCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	if key != "" {
-		name = scopedRepositoryCookieName(key)
-	}
-	http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	if key != "" {
+		name := scopedRepositoryCookieName(key)
+		http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 		http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/repositories/" + key, MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
 	}
 }

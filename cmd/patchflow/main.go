@@ -220,18 +220,19 @@ func serve(arguments []string) int {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	reviewPath := flags.String("review", "", "deprecated: path to review.yaml")
 	repositoryPath := flags.String("repository", "", "repository selected when the server starts")
+	settingsPath := flags.String("config", "", "path to the Patchflow user configuration")
 	address := flags.String("addr", "127.0.0.1:3000", "listen address")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
 	if flags.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "Usage: patchflow serve [--repository PATH] [--addr 127.0.0.1:3000]")
+		fmt.Fprintln(os.Stderr, "Usage: patchflow serve [--repository PATH] [--config PATH] [--addr 127.0.0.1:3000]")
 		return 2
 	}
 	if *repositoryPath == "" && *reviewPath != "" {
 		*repositoryPath = repositoryFromReviewPath(*reviewPath)
 	}
-	handler, err := patchflowweb.NewApp(*repositoryPath, nil)
+	handler, err := patchflowweb.NewAppWithSettings(*repositoryPath, *settingsPath, nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
