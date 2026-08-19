@@ -49,21 +49,23 @@ type App struct {
 
 // Page contains the shared and route-specific data rendered by the layout.
 type Page struct {
-	Title          string
-	BasePath       string
-	RepositoryName string
-	GitHub         *GitHubLinkView
-	Notice         string
-	Alert          string
-	Repository     *RepositoryView
-	Repositories   []RepositoryView
-	RepositoryPath string
-	Reviews        []ReviewListItem
-	BaseRef        string
-	TargetRef      string
-	Review         *ReviewView
-	Chapter        *ChapterView
-	PickerRoot     string
+	Title            string
+	BasePath         string
+	RepositoryName   string
+	GitHub           *GitHubLinkView
+	Notice           string
+	Alert            string
+	Repository       *RepositoryView
+	Repositories     []RepositoryView
+	RepositoryPath   string
+	Reviews          []ReviewListItem
+	BaseRef          string
+	TargetRef        string
+	Review           *ReviewView
+	Chapter          *ChapterView
+	ReviewNavigation *ReviewNavigationView
+	Files            *FilesView
+	PickerRoot       string
 }
 
 // GitHubLinkView describes the external GitHub destination shown on review pages.
@@ -240,7 +242,7 @@ func newApp(defaultRepository, settingsPath string, logger *slog.Logger) (*App, 
 		return nil, fmt.Errorf("parse common templates: %w", err)
 	}
 	templates := map[string]*template.Template{}
-	for _, name := range []string{"home", "new", "overview", "chapter"} {
+	for _, name := range []string{"home", "new", "overview", "chapter", "files"} {
 		page, cloneErr := common.Clone()
 		if cloneErr != nil {
 			return nil, cloneErr
@@ -323,6 +325,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.block(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/steps/"):
 		a.chapter(w, r)
+	case r.Method == http.MethodGet && matchFilesPath(r.URL.Path):
+		a.files(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/reviews/"):
 		a.overview(w, r)
 	default:
@@ -480,7 +484,8 @@ func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 	for _, step := range stored.Review.Steps {
 		view.Steps = append(view.Steps, StepLink{ID: step.ID, Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, Attention: step.Attention})
 	}
-	a.render(w, "overview", Page{Title: view.Title + " · Patchflow", BasePath: requestRepositoryBasePath(r, repository), RepositoryName: repository.Name(), GitHub: githubLinkView(repository, stored.Review.Source.TargetRef), Notice: r.URL.Query().Get("notice"), Review: &view}, http.StatusOK)
+	basePath := requestRepositoryBasePath(r, repository)
+	a.render(w, "overview", Page{Title: view.Title + " · Patchflow", BasePath: basePath, RepositoryName: repository.Name(), GitHub: githubLinkView(repository, stored.Review.Source.TargetRef), ReviewNavigation: reviewNavigationView(basePath, stored, "plan"), Notice: r.URL.Query().Get("notice"), Review: &view}, http.StatusOK)
 }
 
 // chapter resolves an artifact step into renderable prose, code, diff, and diagram blocks.
@@ -555,7 +560,7 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 		view.Threads, view.ThreadAnchors = buildThreadViews(basePath, stored.Review.ID, block.ID, reviewerName, discussion, focusedThreadID, focusedCommentID)
 		chapter.Blocks = append(chapter.Blocks, view)
 	}
-	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", BasePath: basePath, RepositoryName: repository.Name(), GitHub: githubLinkView(repository, stored.Review.Source.TargetRef), Chapter: &chapter, Notice: notice, Alert: alert}, http.StatusOK)
+	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", BasePath: basePath, RepositoryName: repository.Name(), GitHub: githubLinkView(repository, stored.Review.Source.TargetRef), ReviewNavigation: reviewNavigationView(basePath, stored, "plan"), Chapter: &chapter, Notice: notice, Alert: alert}, http.StatusOK)
 }
 
 // githubLinkView derives a review destination without making a hosted-service request.
@@ -882,10 +887,15 @@ func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored
 
 // buildThreadViews filters one discussion to a block and prepares stable UI references.
 func buildThreadViews(basePath, reviewID, blockID, reviewerName string, discussion *artifact.Discussion, focusedThreadID, focusedCommentID string) ([]ThreadView, string) {
+	return buildThreadViewsForBlocks(basePath, reviewID, map[string]bool{blockID: true}, reviewerName, discussion, focusedThreadID, focusedCommentID)
+}
+
+// buildThreadViewsForBlocks combines discussions from several evidence blocks into one view.
+func buildThreadViewsForBlocks(basePath, reviewID string, blockIDs map[string]bool, reviewerName string, discussion *artifact.Discussion, focusedThreadID, focusedCommentID string) ([]ThreadView, string) {
 	views := []ThreadView{}
 	anchors := []map[string]any{}
 	for _, thread := range discussion.Threads {
-		if thread.Target.BlockID != blockID {
+		if !blockIDs[thread.Target.BlockID] {
 			continue
 		}
 		view := buildThreadView(basePath, reviewID, reviewerName, thread, focusedThreadID, focusedCommentID)

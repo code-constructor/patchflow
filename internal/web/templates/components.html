@@ -46,10 +46,10 @@
 <turbo-stream action="update" target="{{.DraftID}}"><template><header class="comment-composer__header"><div><span class="eyebrow">Comment saved</span><strong>{{.Thread.TargetLabel}}</strong></div><button type="button" class="comment-composer__close" data-action="comment-thread#closePopover" aria-label="Close discussion">×</button></header><div class="thread-popover__list" data-comment-saved-thread-id="{{.Thread.ID}}"><article class="comment-thread" data-comment-thread-id="{{.Thread.ID}}">{{template "thread_content" .Thread}}</article></div></template></turbo-stream>{{end}}
 
 {{define "discussion"}}
-  {{if .Commentable}}<section class="discussion-panel" aria-label="Discussion for {{.ReferenceLabel}}">
+  {{if or .Commentable .Threads}}<section class="discussion-panel" aria-label="Discussion for {{.ReferenceLabel}}">
     <div class="thread-list" data-thread-list-for="{{.ID}}">{{range .Threads}}{{template "thread" .}}{{end}}</div>
-  </section>
-    <template data-comment-thread-target="composerTemplate"><div class="comment-popover comment-composer" popover="manual">
+  </section>{{end}}
+    {{if .Commentable}}<template data-comment-thread-target="composerTemplate"><div class="comment-popover comment-composer" popover="manual">
       <header class="comment-composer__header"><div><span class="eyebrow">New comment</span><strong data-comment-role="selection-label">Entire block</strong></div><button type="button" class="comment-composer__close" data-action="comment-thread#closePopover" aria-label="Close comment composer">×</button></header>
       <form method="post" action="{{.ThreadAction}}" class="comment-form" data-turbo-stream>
         <input type="hidden" name="target_type" value="block">
@@ -63,8 +63,7 @@
         <label>Comment<textarea name="body" required placeholder="What should the reviewer or agent know?"></textarea></label>
         <button class="button button--small" type="submit" data-turbo-submits-with="Saving…">Start thread</button>
       </form>
-    </div></template>
-  {{end}}
+    </div></template>{{end}}
 {{end}}
 
 {{define "block"}}

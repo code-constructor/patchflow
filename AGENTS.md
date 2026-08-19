@@ -46,6 +46,8 @@ Build a vertical slice before recreating a full GitHub-like diff viewer:
 6. Render Markdown, Mermaid, syntax-highlighted code, and split/unified diffs.
 7. Discuss whole blocks or immutable source ranges through addressable threads
    shared by the browser, CLI, and Coding Agents.
+8. Switch between the guided plan and an addressable changed-file tree without
+   losing the reviewer's place in either view.
 
 Large-diff virtualization, GitHub PR import, notebook/image viewers, and
 elaborate keyboard navigation are later capabilities.

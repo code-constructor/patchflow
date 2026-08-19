@@ -1,0 +1,15 @@
+{{define "file_tree_nodes"}}<ul class="file-tree__list">{{range .}}<li>{{if .Directory}}<div class="file-tree__directory{{if .Active}} is-active{{end}}"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.75 3.25h4l1.5 1.5h7v8h-12.5z"/></svg><span>{{.Name}}</span></div>{{template "file_tree_nodes" .Children}}{{else}}<a href="{{.URL}}" class="file-tree__file{{if .Active}} is-active{{end}}" title="{{.Path}}"{{if .Active}} aria-current="page"{{end}} data-preserve-diff-mode><span class="file-status file-status--{{.Status}}">{{.StatusCode}}</span><span>{{.Name}}</span></a>{{end}}</li>{{end}}</ul>{{end}}
+
+{{define "file_diff"}}<section class="review-block card code-card file-review-card" id="{{.Diff.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.Diff.ThreadAnchors}}" data-action="patchflow:diff-rendered->comment-thread#enhanceDiff">
+  <header class="code-card__header"><div><div class="eyebrow">{{.StatusLabel}} file</div><h2>{{.Path}}</h2>{{if .PreviousPath}}<p class="file-previous-path">Renamed from {{.PreviousPath}}</p>{{end}}</div><div class="code-card__meta">{{template "block_actions" .Diff}}</div></header>
+  {{if .Diff.Error}}<div class="diff-notice"><strong>Diff not displayed</strong><p>{{.Diff.Error}}. Review this generated or unusually large file directly in the repository.</p></div>{{else}}{{template "diff" .Diff}}{{end}}
+  {{template "discussion" .Diff}}
+</section>{{end}}
+
+{{define "content"}}
+<section class="file-review-heading"><div><div class="eyebrow">Immutable Git comparison</div><h2>Files changed</h2><p class="muted">{{.Files.Summary}}</p></div><span class="status">{{.Files.FileLabel}}</span></section>
+<div class="file-browser section">
+  <aside class="file-tree" aria-label="Changed files"><header class="file-tree__header"><div><div class="eyebrow">Change tree</div><strong>{{.Files.FileLabel}}</strong></div></header>{{if .Files.Tree}}<nav>{{template "file_tree_nodes" .Files.Tree}}</nav>{{else}}<p class="muted file-tree__empty">This comparison has no changed files.</p>{{end}}</aside>
+  <main class="file-browser__content">{{if .Files.Selected}}{{template "file_diff" .Files.Selected}}{{else}}<section class="card file-empty"><div class="eyebrow">File view</div><h2>Choose a changed file</h2><p class="muted">Select a path in the tree to inspect its exact recorded diff.</p></section>{{end}}</main>
+</div>
+{{end}}

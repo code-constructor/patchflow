@@ -18,6 +18,8 @@ a committed base branch from beginning to end:
    the URL.
 10. Persist addressable block and source-range discussions shared by UI, CLI,
     and Coding Agents.
+11. Provide a classic changed-file tree beside the guided plan, with exact-SHA
+    diffs and independent navigation memory for both global review views.
 
 This slice intentionally supports committed text changes in local repositories.
 Working-tree changes, hosted pull-request import, binary viewers, large-diff
@@ -36,6 +38,10 @@ virtualization, and multi-user review are later work.
   shell-interpolated commands.
 - Refs resolve to SHAs before diffing. Artifacts never silently follow a moving
   branch.
+- Guided chapters and changed-file resources have separate URLs. Turbo Drive
+  handles transitions, while browser-tab-local memory restores only the last
+  route and scroll offset for each view; selected files and diff layout remain
+  addressable in the URL.
 - Paths from requests and artifacts are untrusted. Review files stay below the
   selected repository's `.patchflow/reviews` directory, and diff paths stay
   within the selected repository.

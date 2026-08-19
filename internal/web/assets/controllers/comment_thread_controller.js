@@ -273,11 +273,15 @@ export default class extends Controller {
 
   /** decorateCell turns one rendered line number into a draggable comment handle. */
   decorateCell(cell, side) {
-    if (!cell || cell.querySelector(".line-comment-button")) return
+    if (!cell) return
     const match = cell.textContent.trim().match(/^\d+$/)
     if (!match) return
 
     const line = Number.parseInt(match[0], 10)
+    cell.dataset.commentLine = `${line}`
+    cell.dataset.commentSide = side
+    if (!this.hasComposerTemplateTarget || cell.querySelector(".line-comment-button")) return
+
     const button = document.createElement("button")
     button.type = "button"
     button.className = "line-comment-button"
@@ -286,8 +290,6 @@ export default class extends Controller {
     button.dataset.action = "pointerdown->comment-thread#beginLineSelection"
     button.setAttribute("aria-label", `Comment on ${side} line ${line}`)
     button.textContent = "+"
-    cell.dataset.commentLine = `${line}`
-    cell.dataset.commentSide = side
     cell.prepend(button)
   }
 

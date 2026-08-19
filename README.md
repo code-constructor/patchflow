@@ -268,7 +268,11 @@ is a convenience; Patchflow itself requires only its compiled binary and Git.
 Open Patchflow, select a local Git repository, and create a review from a base
 ref such as `main` to a committed target such as `HEAD`. Patchflow resolves the
 merge base and target SHA, creates a baseline review plan, and writes the result
-to the selected repository.
+to the selected repository. Within a review, the global **Review plan** and
+**Files changed** tabs switch between the guided narrative and a classic file
+tree backed by the same immutable commits. Turbo navigation remembers the last
+resource and scroll position independently for both views in the current
+browser tab; every selected file still has its own shareable URL.
 
 The same workflow is available from the command line:
 
