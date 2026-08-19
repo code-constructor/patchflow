@@ -210,6 +210,9 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 			t.Errorf("theme stylesheet missing %q", expected)
 		}
 	}
+	if strings.Contains(styles.Body.String(), ".review-tabs {\n  position: sticky") {
+		t.Error("review view tabs must scroll with the document")
+	}
 
 	securityChapter := perform(app, http.MethodGet, reviewPath+"/steps/security", "")
 	if securityChapter.Code != http.StatusOK || !strings.Contains(securityChapter.Body.String(), "Decision gate") || !strings.Contains(securityChapter.Body.String(), "aria-disabled=\"true\" title=\"This is the first step\"") {

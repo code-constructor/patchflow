@@ -88,8 +88,8 @@
   --chapter-gap: 26px;
   --chapter-offset: calc(var(--chapter-rail-width) + var(--chapter-gap));
   --sticky-offset: 24px;
-  --review-sticky-offset: 74px;
-  --block-header-sticky-offset: var(--review-sticky-offset);
+  --review-sticky-offset: var(--sticky-offset);
+  --block-header-sticky-offset: var(--sticky-offset);
 
   /* Compatibility aliases for the original component vocabulary. */
   --ink: var(--color-text);
@@ -212,9 +212,6 @@ a { color: var(--color-accent); text-underline-offset: 3px; }
 
 .page-shell { width: min(var(--page-width), calc(100% - 48px)); margin: 42px auto 80px; }
 .review-tabs {
-  position: sticky;
-  z-index: 20;
-  top: 12px;
   width: max-content;
   max-width: 100%;
   display: flex;
