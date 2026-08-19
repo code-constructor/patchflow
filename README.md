@@ -225,7 +225,11 @@ execution uses `$XDG_CONFIG_HOME/patchflow/config.json` (normally
 Tabs and even separate browsers can therefore keep reviews from different
 projects open concurrently. The root page lists all reachable repositories
 remembered by that configuration beneath the picker, and every repository page
-links back to the workspace overview. Existing repository cookies from earlier
+links back to the workspace overview. Review pages also show a GitHub shortcut
+when a local remote points to `github.com`. An explicit `refs/pull/<number>/head`
+or `refs/pull/<number>/merge` target links to that pull request; other target
+refs link to the repository. This is derived locally and does not require a
+GitHub login or network request. Existing repository cookies from earlier
 Patchflow versions are imported into the file on first use.
 
 The settings document starts with repository history and is intentionally

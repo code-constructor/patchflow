@@ -52,6 +52,7 @@ type Page struct {
 	Title          string
 	BasePath       string
 	RepositoryName string
+	GitHub         *GitHubLinkView
 	Notice         string
 	Alert          string
 	Repository     *RepositoryView
@@ -63,6 +64,11 @@ type Page struct {
 	Review         *ReviewView
 	Chapter        *ChapterView
 	PickerRoot     string
+}
+
+// GitHubLinkView describes the external GitHub destination shown on review pages.
+type GitHubLinkView struct {
+	URL, Label string
 }
 
 // RepositoryView is one selected or recently opened repository shown in the UI.
@@ -474,7 +480,7 @@ func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 	for _, step := range stored.Review.Steps {
 		view.Steps = append(view.Steps, StepLink{ID: step.ID, Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, Attention: step.Attention})
 	}
-	a.render(w, "overview", Page{Title: view.Title + " · Patchflow", BasePath: requestRepositoryBasePath(r, repository), RepositoryName: repository.Name(), Notice: r.URL.Query().Get("notice"), Review: &view}, http.StatusOK)
+	a.render(w, "overview", Page{Title: view.Title + " · Patchflow", BasePath: requestRepositoryBasePath(r, repository), RepositoryName: repository.Name(), GitHub: githubLinkView(repository, stored.Review.Source.TargetRef), Notice: r.URL.Query().Get("notice"), Review: &view}, http.StatusOK)
 }
 
 // chapter resolves an artifact step into renderable prose, code, diff, and diagram blocks.
@@ -549,7 +555,20 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 		view.Threads, view.ThreadAnchors = buildThreadViews(basePath, stored.Review.ID, block.ID, reviewerName, discussion, focusedThreadID, focusedCommentID)
 		chapter.Blocks = append(chapter.Blocks, view)
 	}
-	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", BasePath: basePath, RepositoryName: repository.Name(), Chapter: &chapter, Notice: notice, Alert: alert}, http.StatusOK)
+	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", BasePath: basePath, RepositoryName: repository.Name(), GitHub: githubLinkView(repository, stored.Review.Source.TargetRef), Chapter: &chapter, Notice: notice, Alert: alert}, http.StatusOK)
+}
+
+// githubLinkView derives a review destination without making a hosted-service request.
+func githubLinkView(repository *gitrepo.Repository, targetRef string) *GitHubLinkView {
+	reference, err := repository.GitHubReference(targetRef)
+	if err != nil || reference == nil {
+		return nil
+	}
+	label := "Open repository on GitHub"
+	if reference.PullRequest {
+		label = "Open pull request on GitHub"
+	}
+	return &GitHubLinkView{URL: reference.URL, Label: label}
 }
 
 // block renders the current chapter for a globally unique block ID.

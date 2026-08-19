@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,10 +18,19 @@ import (
 const MaxDiffBytes = 2 * 1024 * 1024
 
 var shaPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
+var githubPathPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+var pullRequestRefPattern = regexp.MustCompile(`^(?:refs/)?pull/([1-9][0-9]*)/(?:head|merge)$`)
 
 // Repository is a canonical local Git worktree boundary.
 type Repository struct {
 	root string
+}
+
+// GitHubReference is a browser destination derived entirely from local Git metadata.
+type GitHubReference struct {
+	URL         string
+	Repository  string
+	PullRequest bool
 }
 
 // Error is a safe, user-facing Git or repository failure.
@@ -82,6 +92,57 @@ func (r *Repository) UserName() (string, error) {
 		return "", &Error{Message: "Git user.name is not configured"}
 	}
 	return name, nil
+}
+
+// GitHubReference returns a repository or pull-request link when a GitHub remote exists.
+func (r *Repository) GitHubReference(targetRef string) (*GitHubReference, error) {
+	remoteOutput, err := r.git("remote")
+	if err != nil {
+		return nil, nil
+	}
+	names := strings.Fields(remoteOutput)
+	for index, name := range names {
+		if name == "origin" && index > 0 {
+			names[0], names[index] = names[index], names[0]
+			break
+		}
+	}
+	for _, name := range names {
+		remote, remoteErr := r.git("remote", "get-url", name)
+		if remoteErr != nil {
+			continue
+		}
+		repositoryPath, ok := parseGitHubRemote(strings.TrimSpace(remote))
+		if !ok {
+			continue
+		}
+		reference := &GitHubReference{URL: "https://github.com/" + repositoryPath, Repository: repositoryPath}
+		if matches := pullRequestRefPattern.FindStringSubmatch(targetRef); len(matches) == 2 {
+			reference.URL += "/pull/" + matches[1]
+			reference.PullRequest = true
+		}
+		return reference, nil
+	}
+	return nil, nil
+}
+
+// parseGitHubRemote normalizes supported HTTPS, SSH, Git, and SCP-like remote forms.
+func parseGitHubRemote(remote string) (string, bool) {
+	path := ""
+	if strings.HasPrefix(remote, "git@github.com:") {
+		path = strings.TrimPrefix(remote, "git@github.com:")
+	} else {
+		parsed, err := url.Parse(remote)
+		if err != nil || !strings.EqualFold(parsed.Hostname(), "github.com") {
+			return "", false
+		}
+		path = strings.TrimPrefix(parsed.Path, "/")
+	}
+	path = strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".git")
+	if !githubPathPattern.MatchString(path) {
+		return "", false
+	}
+	return path, true
 }
 
 // ResolveCommit converts a user-facing ref into an immutable full commit SHA.

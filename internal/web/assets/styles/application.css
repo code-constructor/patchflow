@@ -158,6 +158,20 @@ a { color: var(--color-accent); text-underline-offset: 3px; }
 }
 
 .site-context { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.github-link {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: var(--color-heading);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  transition: color var(--motion-fast), border-color var(--motion-fast), background var(--motion-fast);
+}
+.github-link:hover { color: var(--color-accent-strong); border-color: var(--color-accent); background: var(--color-accent-soft); }
+.github-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.github-link svg { width: 18px; height: 18px; fill: currentColor; }
 .repository-overview-link { color: var(--color-muted); font-size: 13px; font-weight: 650; text-decoration: none; }
 .repository-overview-link:hover { color: var(--color-accent-strong); }
 .repository-chip, .status {

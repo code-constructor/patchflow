@@ -43,6 +43,9 @@ virtualization, and multi-user review are later work.
   deterministic baseline; a Coding Agent can replace it with a richer plan by
   producing the same artifact format.
 - Generated `.patchflow` content is excluded from the reviewed diff by default.
+- Review pages derive an optional GitHub repository or pull-request shortcut
+  from local remote and target-ref metadata, without adding a hosted-service
+  API dependency.
 - The Go application, schema, fixtures, documentation, embedded frontend, and
   Coding Agent skill live in one monorepo.
 
