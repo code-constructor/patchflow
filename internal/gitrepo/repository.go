@@ -71,6 +71,19 @@ func (r *Repository) Root() string { return r.root }
 // Name returns the final path component used as the repository display name.
 func (r *Repository) Name() string { return filepath.Base(r.root) }
 
+// UserName returns the effective Git author name for this repository.
+func (r *Repository) UserName() (string, error) {
+	name, err := r.git("config", "--get", "user.name")
+	if err != nil {
+		return "", &Error{Message: "Git user.name is not configured"}
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", &Error{Message: "Git user.name is not configured"}
+	}
+	return name, nil
+}
+
 // ResolveCommit converts a user-facing ref into an immutable full commit SHA.
 func (r *Repository) ResolveCommit(ref string) (string, error) {
 	if err := validateRef(ref); err != nil {

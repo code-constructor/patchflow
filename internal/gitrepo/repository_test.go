@@ -33,6 +33,22 @@ func TestChangedFilesAndLiteralDiff(t *testing.T) {
 	}
 }
 
+// TestUserNameReadsEffectiveRepositoryConfiguration protects reviewer attribution.
+func TestUserNameReadsEffectiveRepositoryConfiguration(t *testing.T) {
+	directory := testRepository(t)
+	repository, err := Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := repository.UserName()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "Test" {
+		t.Fatalf("unexpected Git user name %q", name)
+	}
+}
+
 // TestDiffRejectsFilesOverDisplayLimit verifies the explicit large-diff boundary.
 func TestDiffRejectsFilesOverDisplayLimit(t *testing.T) {
 	directory := testRepository(t)

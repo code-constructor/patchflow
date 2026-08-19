@@ -112,6 +112,7 @@ type BlockView struct {
 	Threads         []ThreadView
 	ThreadAction    string
 	ThreadAnchors   string
+	ReviewerName    string
 	Commentable     bool
 	Focused         bool
 	Collapsed       bool
@@ -134,6 +135,7 @@ type ThreadView struct {
 	ResolutionAction string
 	ResolutionLabel  string
 	ResolutionValue  string
+	ReviewerName     string
 	Resolved         bool
 	Focused          bool
 	Comments         []CommentView
@@ -443,6 +445,10 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 		alert = discussionErr.Error()
 		discussion = &artifact.Discussion{Threads: []artifact.Thread{}}
 	}
+	reviewerName, reviewerErr := repository.UserName()
+	if reviewerErr != nil {
+		reviewerName = "Reviewer"
+	}
 	for _, block := range blocks {
 		view := buildBlock(repository, store, stored, files, block)
 		view.ReferencePath = "/reviews/" + stored.Review.ID + "/blocks/" + block.ID
@@ -451,7 +457,8 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 		view.Focused = block.ID == focusedBlockID
 		view.Commentable = stored.Review.SchemaVersion == 2
 		view.ThreadAction = view.ReferencePath + "/threads"
-		view.Threads, view.ThreadAnchors = buildThreadViews(stored.Review.ID, block.ID, discussion, focusedThreadID, focusedCommentID)
+		view.ReviewerName = reviewerName
+		view.Threads, view.ThreadAnchors = buildThreadViews(stored.Review.ID, block.ID, reviewerName, discussion, focusedThreadID, focusedCommentID)
 		chapter.Blocks = append(chapter.Blocks, view)
 	}
 	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", RepositoryName: repository.Name(), Chapter: &chapter, Notice: notice, Alert: alert}, http.StatusOK)
@@ -701,7 +708,7 @@ func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored
 }
 
 // buildThreadViews filters one discussion to a block and prepares stable UI references.
-func buildThreadViews(reviewID, blockID string, discussion *artifact.Discussion, focusedThreadID, focusedCommentID string) ([]ThreadView, string) {
+func buildThreadViews(reviewID, blockID, reviewerName string, discussion *artifact.Discussion, focusedThreadID, focusedCommentID string) ([]ThreadView, string) {
 	views := []ThreadView{}
 	anchors := []map[string]any{}
 	for _, thread := range discussion.Threads {
@@ -715,6 +722,7 @@ func buildThreadViews(reviewID, blockID string, discussion *artifact.Discussion,
 			ReferenceLabel:   "thread " + thread.ID,
 			ReplyAction:      "/reviews/" + reviewID + "/threads/" + thread.ID + "/replies",
 			ResolutionAction: "/reviews/" + reviewID + "/threads/" + thread.ID + "/resolution",
+			ReviewerName:     reviewerName,
 			Resolved:         thread.Resolved,
 			Focused:          thread.ID == focusedThreadID,
 		}

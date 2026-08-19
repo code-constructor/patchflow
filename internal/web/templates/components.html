@@ -31,7 +31,7 @@
         {{template "markdown" .Body}}
       </article>{{end}}</div>
       <details class="reply-composer"><summary>Reply to thread</summary><form method="post" action="{{.ReplyAction}}" class="comment-form">
-        <label>Your name<input name="author" value="Reviewer" required></label>
+        <label>Your name<input name="author" value="{{.ReviewerName}}" required></label>
         <label>Reply<textarea name="body" required placeholder="Add context, answer the question, or explain a concern."></textarea></label>
         <button class="button button--small" type="submit">Add reply</button>
       </form></details>
@@ -46,7 +46,7 @@
         <input type="hidden" name="start_line" data-comment-thread-target="startLine">
         <input type="hidden" name="end_line" data-comment-thread-target="endLine">
         <div class="comment-selection" data-comment-thread-target="selection" hidden><span></span><button type="button" class="button-link" data-action="comment-thread#resetTarget">Comment on block instead</button></div>
-        <label>Your name<input name="author" value="Reviewer" required></label>
+        <label>Your name<input name="author" value="{{.ReviewerName}}" required></label>
         <label>Comment<textarea name="body" required data-comment-thread-target="body" placeholder="What should the reviewer or agent know?"></textarea></label>
         <button class="button button--small" type="submit">Start thread</button>
       </form>

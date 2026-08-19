@@ -47,7 +47,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 			t.Errorf("chapter missing %q", expected)
 		}
 	}
-	for _, expected := range []string{"aria-label=\"Comment on block domain-intro\"", "title=\"Add comment\"", "popover=\"auto\""} {
+	for _, expected := range []string{"aria-label=\"Comment on block domain-intro\"", "title=\"Add comment\"", "popover=\"auto\"", "name=\"author\" value=\"Patchflow Test\""} {
 		if !strings.Contains(chapter.Body.String(), expected) {
 			t.Errorf("chapter comment action missing %q", expected)
 		}
@@ -134,7 +134,7 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 	}
 	thread := discussion.Threads[0]
 	threadPage := perform(app, http.MethodGet, reviewPath+"/threads/"+thread.ID, "")
-	for _, expected := range []string{"Please explain this boundary.", "comment-thread is-focused", reviewPath + "/comments/" + thread.Comments[0].ID, "data-controller=\"comment-thread\""} {
+	for _, expected := range []string{"Please explain this boundary.", "comment-thread is-focused", reviewPath + "/comments/" + thread.Comments[0].ID, "data-controller=\"comment-thread\"", "name=\"author\" value=\"Patchflow Test\""} {
 		if !strings.Contains(threadPage.Body.String(), expected) {
 			t.Errorf("thread page missing %q", expected)
 		}

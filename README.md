@@ -91,7 +91,9 @@ Comment authoring stays out of the reading flow until it is needed. Use the
 speech-bubble action on a block for a block-wide thread. In code and diff
 blocks, press a line's `+`, drag to the last relevant line, and release to open
 the contextual composer for that immutable source range. Press and release on
-one line to target only that line.
+one line to target only that line. Patchflow pre-fills the reviewer name from
+the selected repository's effective `git config user.name`; `Reviewer` is used
+only when Git has no configured name.
 
 Generated `.patchflow` artifacts are excluded from the diff under review by
 default, preventing Patchflow from reviewing its own output.
@@ -163,6 +165,14 @@ The host's `$HOME/Projects` directory is mounted at `/workspace`, allowing
 Patchflow to review local projects. For example, host project
 `$HOME/Projects/example` is selected in the container UI as
 `/workspace/example`.
+
+The Compose setup also mounts the host's XDG Git configuration read-only so
+comment forms can use `git config user.name`. If your global Git configuration
+lives elsewhere, point Patchflow at it explicitly:
+
+```sh
+PATCHFLOW_GIT_CONFIG_PATH="$HOME/.gitconfig" docker compose up --build
+```
 
 The **Browse…** button opens a server-side repository picker rooted at
 `/workspace`, so container paths do not need to be entered by hand. In local
