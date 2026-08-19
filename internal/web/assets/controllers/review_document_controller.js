@@ -12,8 +12,14 @@ export default class extends Controller {
       breaks: false
     })
     this.outputTarget.innerHTML = DOMPurify.sanitize(renderedMarkdown)
+    this.prepareLinks()
     this.sourceTarget.dataset.rendered = "true"
     await this.renderMermaidDiagrams()
+  }
+
+  /** prepareLinks keeps prose navigation out of an owning review-block Turbo Frame. */
+  prepareLinks() {
+    for (const link of this.outputTarget.querySelectorAll("a")) link.dataset.turboFrame = "_top"
   }
 
   /** Replaces Mermaid code fences with strict, sanitized SVG diagrams. */

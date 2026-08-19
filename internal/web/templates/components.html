@@ -58,6 +58,7 @@
 {{end}}
 
 {{define "block"}}
+  <turbo-frame id="review-block-{{.ID}}" class="review-block-frame">
   {{if eq .Type "prose"}}
     <section class="review-block review-block--prose{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-reference-row">{{template "block_actions" .}}</div>{{template "markdown" .Body}}{{template "discussion" .}}</section>
   {{else if eq .Type "callout"}}
@@ -96,4 +97,5 @@
       {{template "discussion" .}}
     </section>
   {{end}}
+  </turbo-frame>
 {{end}}

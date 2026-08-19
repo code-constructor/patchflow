@@ -94,10 +94,14 @@ the contextual composer for that immutable source range. Press and release on
 one line to target only that line. Each composer stays anchored at its opening
 position while the document scrolls, and multiple independent drafts can remain
 open at once. Persisted source discussions appear as numbered line markers and
-can be reopened contextually; human-authored comments can be edited without
-changing their stable IDs. Patchflow pre-fills the reviewer name from the
-selected repository's effective `git config user.name`; `Reviewer` is used only
-when Git has no configured name.
+can be reopened contextually. A multi-line thread is rendered as one continuous
+range with one marker, and the same thread cannot be opened in duplicate.
+Human-authored comments can be edited without changing their stable IDs.
+Patchflow pre-fills the reviewer name from the selected repository's effective
+`git config user.name`; `Reviewer` is used only when Git has no configured name.
+Comment creation, replies, edits, and resolution changes replace only their own
+review block through Turbo Frames, preserving the surrounding chapter and
+scroll position.
 
 Generated `.patchflow` artifacts are excluded from the diff under review by
 default, preventing Patchflow from reviewing its own output.

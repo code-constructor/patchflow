@@ -98,12 +98,26 @@ export default class extends Controller {
 
   /** revealThreads clones persisted thread cards into an independent contextual window. */
   revealThreads(anchor, threadIDs) {
-    const threads = threadIDs.map((threadID) => this.threadElement(threadID)).filter(Boolean)
+    const requestedIDs = [...new Set(threadIDs)]
+    const unopenedIDs = []
+    for (const threadID of requestedIDs) {
+      const existing = this.openThreadPopover(threadID)
+      if (existing) {
+        existing.hidePopover()
+        existing.showPopover()
+        existing.focus({ preventScroll: true })
+      } else {
+        unopenedIDs.push(threadID)
+      }
+    }
+    const threads = unopenedIDs.map((threadID) => this.threadElement(threadID)).filter(Boolean)
     if (threads.length === 0) return
 
     const popover = document.createElement("section")
     popover.className = "comment-popover thread-popover"
     popover.setAttribute("popover", "manual")
+    popover.tabIndex = -1
+    popover.dataset.threadIds = JSON.stringify(unopenedIDs)
     const header = document.createElement("header")
     header.className = "comment-composer__header"
     const title = document.createElement("strong")
@@ -128,6 +142,12 @@ export default class extends Controller {
     this.element.append(popover)
     popover.showPopover()
     this.positionPopover(popover, anchor)
+  }
+
+  /** openThreadPopover finds the one open discussion window already containing a thread. */
+  openThreadPopover(threadID) {
+    return [...this.element.querySelectorAll(".thread-popover:popover-open")]
+      .find((popover) => JSON.parse(popover.dataset.threadIds || "[]").includes(threadID))
   }
 
   /** threadElement returns the original rendered card for one stable thread ID. */
@@ -241,6 +261,9 @@ export default class extends Controller {
     }
     button.dataset.threadIds = JSON.stringify(anchors.map((anchor) => anchor.id))
     button.setAttribute("aria-label", `Open ${anchors.length} ${anchors.length === 1 ? "discussion" : "discussions"} on this line`)
+    button.title = anchors.length === 1 && anchors[0].start !== anchors[0].end
+      ? `Open discussion for lines ${anchors[0].start}–${anchors[0].end}`
+      : "Open discussions"
     button.textContent = `${anchors.length}`
   }
 
@@ -317,7 +340,9 @@ export default class extends Controller {
       const line = Number.parseInt(element.dataset.commentLine, 10)
       const anchors = this.anchorsValue.filter((anchor) => anchor.side === element.dataset.commentSide && line >= anchor.start && line <= anchor.end)
       element.classList.toggle("has-comment-thread", anchors.length > 0)
-      this.decorateThreadMarker(element, anchors)
+      element.classList.toggle("is-comment-thread-start", anchors.some((anchor) => anchor.start === line))
+      element.classList.toggle("is-comment-thread-end", anchors.some((anchor) => anchor.end === line))
+      this.decorateThreadMarker(element, anchors.filter((anchor) => anchor.start === line))
     }
   }
 }
