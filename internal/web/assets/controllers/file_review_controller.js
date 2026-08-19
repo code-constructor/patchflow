@@ -1,7 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["item", "treeLink"]
+  static targets = ["item", "layout", "treeLink", "treeToggle", "treeToggleLabel"]
 
   /** Restores an addressable file position and starts tracking the visible diff. */
   connect() {
@@ -22,6 +22,7 @@ export default class extends Controller {
     this.layoutObserver = new ResizeObserver(() => this.handleInitialResize())
     const content = this.element.querySelector(".file-browser__content")
     if (content) this.layoutObserver.observe(content)
+    this.restoreTreeState()
     this.restoreInitialPosition()
   }
 
@@ -33,6 +34,40 @@ export default class extends Controller {
     window.removeEventListener("popstate", this.handlePopState)
     window.removeEventListener("patchflow:diff-mode", this.receiveMode)
     document.removeEventListener("turbo:frame-load", this.handleFrameLoad)
+  }
+
+  /** Hides or restores the file tree while preserving the current diff stream. */
+  toggleTree() {
+    this.setTreeCollapsed(!this.layoutTarget.classList.contains("is-tree-collapsed"))
+  }
+
+  /** Restores this review's tree preference for the current browser tab. */
+  restoreTreeState() {
+    let collapsed = false
+    try {
+      collapsed = sessionStorage.getItem(this.treeStorageKey()) === "collapsed"
+    } catch (_) {
+      // The tree remains expanded when browser storage is unavailable.
+    }
+    this.setTreeCollapsed(collapsed)
+  }
+
+  /** Applies the tree layout and synchronizes its accessible toggle state. */
+  setTreeCollapsed(collapsed) {
+    this.layoutTarget.classList.toggle("is-tree-collapsed", collapsed)
+    this.treeToggleTarget.setAttribute("aria-expanded", String(!collapsed))
+    this.treeToggleLabelTarget.textContent = collapsed ? "Show tree" : "Hide tree"
+    try {
+      sessionStorage.setItem(this.treeStorageKey(), collapsed ? "collapsed" : "expanded")
+    } catch (_) {
+      // The in-page toggle still works when browser storage is unavailable.
+    }
+  }
+
+  /** Namespaces the transient tree preference by repository and review path. */
+  treeStorageKey() {
+    const reviewPath = window.location.pathname.split("/files")[0]
+    return `patchflow:file-tree:${reviewPath}`
   }
 
   /** Reanchors the first deep-link jump while eager diff frames settle. */

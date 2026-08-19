@@ -63,7 +63,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 
 	fileIndex := perform(app, http.MethodGet, reviewPath+"/files", "")
-	if fileIndex.Code != http.StatusOK || !strings.Contains(fileIndex.Body.String(), "class=\"file-stream\"") || !strings.Contains(fileIndex.Body.String(), "loading=\"lazy\"") || !strings.Contains(fileIndex.Body.String(), "app") || !strings.Contains(fileIndex.Body.String(), "vendor") {
+	if fileIndex.Code != http.StatusOK || !strings.Contains(fileIndex.Body.String(), "class=\"file-stream\"") || !strings.Contains(fileIndex.Body.String(), "loading=\"lazy\"") || !strings.Contains(fileIndex.Body.String(), "data-action=\"file-review#toggleTree\"") || !strings.Contains(fileIndex.Body.String(), "aria-controls=\"changed-files-tree\"") || !strings.Contains(fileIndex.Body.String(), "app") || !strings.Contains(fileIndex.Body.String(), "vendor") {
 		t.Fatalf("unexpected changed-file index: %d %s", fileIndex.Code, fileIndex.Body.String())
 	}
 	fileURL := reviewPath + "/files/app/models/account.rb?diff=unified"
@@ -77,7 +77,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		t.Fatalf("changed-file view returned %d: %s", fileView.Code, fileView.Body.String())
 	}
 	fileFrame := performFrame(app, fileURL, fileFrameID("app/models/account.rb"))
-	for _, expected := range []string{"Modified file", "def locked? = true", "data-controller=\"diff-viewer\"", "data-diff-viewer-initial-value=\"split\"", "aria-label=\"Comment on file app/models/account.rb\"", "data-thread-list-for=\"domain-app-models-account-rb", ">Viewed</span>"} {
+	for _, expected := range []string{"file-change-kind file-change-kind--modified\">Modified", "def locked? = true", "data-controller=\"diff-viewer\"", "data-diff-viewer-initial-value=\"split\"", "aria-label=\"Comment on file app/models/account.rb\"", "data-thread-list-for=\"domain-app-models-account-rb", ">Viewed</span>"} {
 		if !strings.Contains(fileFrame.Body.String(), expected) {
 			t.Errorf("changed-file frame missing %q", expected)
 		}
@@ -131,7 +131,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		}
 	}
 	fileReviewController := perform(app, http.MethodGet, "/assets/controllers/file_review_controller.js", "")
-	for _, expected := range []string{"IntersectionObserver", "history.pushState", "history.replaceState", "scrollIntoView", "patchflow:diff-mode"} {
+	for _, expected := range []string{"IntersectionObserver", "history.pushState", "history.replaceState", "scrollIntoView", "patchflow:diff-mode", "is-tree-collapsed", "sessionStorage", "treeStorageKey"} {
 		if !strings.Contains(fileReviewController.Body.String(), expected) {
 			t.Errorf("file review controller missing %q", expected)
 		}
