@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -53,6 +54,7 @@ type Page struct {
 	Notice         string
 	Alert          string
 	Repository     *RepositoryView
+	Repositories   []RepositoryView
 	RepositoryPath string
 	Reviews        []ReviewListItem
 	BaseRef        string
@@ -62,8 +64,10 @@ type Page struct {
 	PickerRoot     string
 }
 
-// RepositoryView is the selected repository summary shown in the UI.
-type RepositoryView struct{ Name, Path string }
+// RepositoryView is one selected or recently opened repository shown in the UI.
+type RepositoryView struct {
+	Name, Path, BasePath, ReviewLabel string
+}
 
 // ReviewListItem is the compact representation used by the home-page review list.
 type ReviewListItem struct{ ID, Title, Summary, Status string }
@@ -301,11 +305,16 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // home renders repository selection or the selected repository's review list.
 func (a *App) home(w http.ResponseWriter, r *http.Request) {
 	page := Page{Title: "Patchflow · Understand the change", RepositoryPath: a.defaultRepository, PickerRoot: a.browseRoot, Notice: r.URL.Query().Get("notice"), Alert: r.URL.Query().Get("alert")}
+	if repositoryScopeFromRequest(r).Key == "" {
+		page.Repositories = a.activeRepositories(r)
+		a.render(w, "home", page, http.StatusOK)
+		return
+	}
 	repository, err := a.currentRepository(r)
 	if err == nil && repository != nil {
 		page.BasePath = repositoryBasePath(repository)
 		setScopedRepositoryCookie(w, repository)
-		page.Repository = &RepositoryView{Name: repository.Name(), Path: repository.Root()}
+		page.Repository = &RepositoryView{Name: repository.Name(), Path: repository.Root(), BasePath: page.BasePath}
 		page.RepositoryName = repository.Name()
 		page.Title = repository.Name() + " · Patchflow"
 		store, storeErr := patchreview.NewStore(repository.Root(), nil)
@@ -989,11 +998,80 @@ func scopedRepositoryCookieName(key string) string {
 	return repositoryCookie + "_" + key
 }
 
+// activeRepositories restores all valid repository selections visible to the dashboard.
+func (a *App) activeRepositories(r *http.Request) []RepositoryView {
+	repositories := map[string]*gitrepo.Repository{}
+	addPath := func(path string) {
+		repository, err := gitrepo.Open(path)
+		if err == nil {
+			repositories[repositoryKey(repository)] = repository
+		}
+	}
+	if a.defaultRepository != "" {
+		addPath(a.defaultRepository)
+	}
+	for _, cookie := range r.Cookies() {
+		key := ""
+		switch {
+		case cookie.Name == repositoryCookie:
+		case strings.HasPrefix(cookie.Name, repositoryCookie+"_"):
+			key = strings.TrimPrefix(cookie.Name, repositoryCookie+"_")
+			if !validRepositoryKey(key) {
+				continue
+			}
+		default:
+			continue
+		}
+		decoded, err := base64.RawURLEncoding.DecodeString(cookie.Value)
+		if err != nil {
+			continue
+		}
+		repository, err := gitrepo.Open(string(decoded))
+		if err != nil || (key != "" && repositoryKey(repository) != key) {
+			continue
+		}
+		repositories[repositoryKey(repository)] = repository
+	}
+
+	views := make([]RepositoryView, 0, len(repositories))
+	for _, repository := range repositories {
+		reviewLabel := "No reviews"
+		if store, err := patchreview.NewStore(repository.Root(), nil); err == nil {
+			if reviews, allErr := store.All(); allErr == nil {
+				switch len(reviews) {
+				case 1:
+					reviewLabel = "1 review"
+				default:
+					if len(reviews) > 1 {
+						reviewLabel = fmt.Sprintf("%d reviews", len(reviews))
+					}
+				}
+			}
+		}
+		views = append(views, RepositoryView{Name: repository.Name(), Path: repository.Root(), BasePath: repositoryBasePath(repository), ReviewLabel: reviewLabel})
+	}
+	sort.Slice(views, func(left, right int) bool {
+		if views[left].Name == views[right].Name {
+			return views[left].Path < views[right].Path
+		}
+		return views[left].Name < views[right].Name
+	})
+	return views
+}
+
 // currentRepository restores the repository addressed by the URL or the legacy default.
 func (a *App) currentRepository(r *http.Request) (*gitrepo.Repository, error) {
 	scope := repositoryScopeFromRequest(r)
 	if scope.Key != "" {
 		if cookie, err := r.Cookie(scopedRepositoryCookieName(scope.Key)); err == nil {
+			if decoded, decodeErr := base64.RawURLEncoding.DecodeString(cookie.Value); decodeErr == nil {
+				repository, openErr := gitrepo.Open(string(decoded))
+				if openErr == nil && repositoryKey(repository) == scope.Key {
+					return repository, nil
+				}
+			}
+		}
+		if cookie, err := r.Cookie(repositoryCookie); err == nil {
 			if decoded, decodeErr := base64.RawURLEncoding.DecodeString(cookie.Value); decodeErr == nil {
 				repository, openErr := gitrepo.Open(string(decoded))
 				if openErr == nil && repositoryKey(repository) == scope.Key {
@@ -1032,6 +1110,7 @@ func (a *App) requireRepository(w http.ResponseWriter, r *http.Request) (*gitrep
 		redirect(w, r, "/", "alert", message)
 		return nil, false
 	}
+	setScopedRepositoryCookie(w, repository)
 	return repository, true
 }
 
@@ -1081,20 +1160,22 @@ func (a *App) securityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "same-origin")
 }
 
-// setScopedRepositoryCookie stores one path under the repository-specific URL namespace.
+// setScopedRepositoryCookie stores one path under its repository-specific cookie name.
 func setScopedRepositoryCookie(w http.ResponseWriter, repository *gitrepo.Repository) {
 	key := repositoryKey(repository)
-	http.SetCookie(w, &http.Cookie{Name: scopedRepositoryCookieName(key), Value: base64.RawURLEncoding.EncodeToString([]byte(repository.Root())), Path: repositoryBasePath(repository), HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: scopedRepositoryCookieName(key), Value: base64.RawURLEncoding.EncodeToString([]byte(repository.Root())), Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
 }
 
 // clearRepositoryCookie expires either one scoped selection or the legacy global selection.
 func clearRepositoryCookie(w http.ResponseWriter, key string) {
-	name, path := repositoryCookie, "/"
+	name := repositoryCookie
 	if key != "" {
 		name = scopedRepositoryCookieName(key)
-		path = "/repositories/" + key
 	}
-	http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: path, MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	if key != "" {
+		http.SetCookie(w, &http.Cookie{Name: name, Value: "", Path: "/repositories/" + key, MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	}
 }
 
 // redirect appends a short flash message and sends a See Other response.

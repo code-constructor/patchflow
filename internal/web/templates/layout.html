@@ -13,8 +13,8 @@
   </head>
   <body>
     <header class="site-header">
-      <a href="{{if .BasePath}}{{.BasePath}}{{else}}/{{end}}" class="brand"><span class="brand-mark">P</span><span>Patchflow</span></a>
-      {{if .RepositoryName}}<span class="repository-chip">{{.RepositoryName}}</span>{{end}}
+      <a href="/" class="brand"><span class="brand-mark">P</span><span>Patchflow</span></a>
+      {{if .RepositoryName}}<nav class="site-context" aria-label="Repository navigation"><a href="/" class="repository-overview-link">All repositories</a><a href="{{.BasePath}}" class="repository-chip">{{.RepositoryName}}</a></nav>{{end}}
     </header>
     <main class="page-shell">
       {{if .Notice}}<div class="flash">{{.Notice}}</div>{{end}}

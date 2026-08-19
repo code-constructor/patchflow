@@ -22,7 +22,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 
 	home := perform(app, http.MethodGet, "/", "")
-	if home.Code != http.StatusOK || !strings.Contains(home.Body.String(), "Create the first review") {
+	if home.Code != http.StatusOK || !strings.Contains(home.Body.String(), "Open repositories") || !strings.Contains(home.Body.String(), repository) {
 		t.Fatalf("unexpected home response: %d %s", home.Code, home.Body.String())
 	}
 
@@ -42,7 +42,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 
 	chapter := perform(app, http.MethodGet, reviewPath+"/steps/domain", "")
-	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\"", "id=\"domain-intro\"", "id=\"review-block-domain-intro\"", "class=\"review-block-frame\"", "type=\"button\"", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-intro\"", "aria-label=\"Copy path for block domain-intro\"", "data-controller=\"chapter-navigation\"", "Review question", "Does the domain behavior", "Chapter takeaway", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-takeaway\""} {
+	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\"", "id=\"domain-intro\"", "id=\"review-block-domain-intro\"", "class=\"review-block-frame\"", "type=\"button\"", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-intro\"", "aria-label=\"Copy path for block domain-intro\"", "data-controller=\"chapter-navigation\"", "Review question", "Does the domain behavior", "Chapter takeaway", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-takeaway\"", "href=\"/\" class=\"repository-overview-link\""} {
 		if !strings.Contains(chapter.Body.String(), expected) {
 			t.Errorf("chapter missing %q", expected)
 		}
@@ -241,6 +241,9 @@ func TestAppKeepsRepositoryTabsIndependent(t *testing.T) {
 	if len(firstCookies) != 1 || len(secondCookies) != 1 {
 		t.Fatalf("repository opens did not issue scoped cookies: %v %v", firstCookies, secondCookies)
 	}
+	if firstCookies[0].Path != "/" || secondCookies[0].Path != "/" {
+		t.Fatalf("repository cookies are not visible to the dashboard: %q %q", firstCookies[0].Path, secondCookies[0].Path)
+	}
 	if firstBase == secondBase || firstCookies[0].Name == secondCookies[0].Name {
 		t.Fatalf("repositories share URL or cookie identity: %q %q", firstBase, secondBase)
 	}
@@ -255,6 +258,12 @@ func TestAppKeepsRepositoryTabsIndependent(t *testing.T) {
 	}
 	if secondHome.Code != http.StatusOK || !strings.Contains(secondHome.Body.String(), secondRepository) {
 		t.Fatalf("second repository tab lost its context: %d %s", secondHome.Code, secondHome.Body.String())
+	}
+	dashboard := performWithCookies(app, http.MethodGet, "/", "", firstCookies[0], secondCookies[0])
+	for _, expected := range []string{firstRepository, secondRepository, firstBase, secondBase, "Open repositories"} {
+		if !strings.Contains(dashboard.Body.String(), expected) {
+			t.Errorf("repository dashboard is missing %q", expected)
+		}
 	}
 
 	wrongCookie := performWithCookie(app, http.MethodGet, firstBase+"/reviews/new", "", secondCookies[0])
@@ -403,9 +412,16 @@ func performTurbo(handler http.Handler, method, path, body string) *httptest.Res
 
 // performWithCookie sends one request with a repository-scoped browser cookie.
 func performWithCookie(handler http.Handler, method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+	return performWithCookies(handler, method, path, body, cookie)
+}
+
+// performWithCookies sends one request with repository-specific browser cookies.
+func performWithCookies(handler http.Handler, method, path, body string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.AddCookie(cookie)
+	for _, cookie := range cookies {
+		request.AddCookie(cookie)
+	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response

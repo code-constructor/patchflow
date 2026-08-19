@@ -215,9 +215,11 @@ user's `Projects` directory.
 
 Each opened repository receives a short URL namespace such as
 `/repositories/4a1f…/reviews/<review-id>`. The absolute local path remains in an
-HttpOnly cookie scoped to that namespace. Tabs can therefore keep reviews from
+repository-specific HttpOnly cookie. Tabs can therefore keep reviews from
 different projects open concurrently without changing one another's repository
-selection.
+selection. The root page lists all reachable repositories remembered by those
+cookies beneath the picker, and every repository page links back to that
+workspace overview.
 
 The image runs as UID and GID `1000` by default so review artifacts remain owned
 by the developer. Override these values on systems with different IDs:

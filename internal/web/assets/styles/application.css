@@ -157,6 +157,9 @@ a { color: var(--color-accent); text-underline-offset: 3px; }
   border-radius: var(--radius-md);
 }
 
+.site-context { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.repository-overview-link { color: var(--color-muted); font-size: 13px; font-weight: 650; text-decoration: none; }
+.repository-overview-link:hover { color: var(--color-accent-strong); }
 .repository-chip, .status {
   padding: 5px 9px;
   border-radius: var(--radius-pill);
@@ -166,6 +169,7 @@ a { color: var(--color-accent); text-underline-offset: 3px; }
   color: var(--color-accent-strong);
   font-family: var(--font-mono);
 }
+.repository-chip { text-decoration: none; }
 
 .page-shell { width: min(var(--page-width), calc(100% - 48px)); margin: 42px auto 80px; }
 .narrow { width: min(680px, 100%); margin-inline: auto; }
@@ -251,6 +255,8 @@ textarea { min-height: 92px; resize: vertical; }
   text-decoration: none;
 }
 .review-link:hover, .step-link:hover { border-color: var(--color-border-strong); background: var(--color-accent-subtle); }
+.repository-dashboard { width: min(960px, 100%); margin-inline: auto; }
+.repository-link .repo-path { display: inline-block; max-width: min(70vw, 760px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .step-number { width: 34px; height: 34px; display: grid; place-items: center; border-radius: var(--radius-sm); background: var(--color-accent-soft); color: var(--color-accent-strong); font-family: var(--font-mono); font-weight: 800; }
 .priority { font-family: var(--font-mono); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .priority--critical { color: var(--danger); }
