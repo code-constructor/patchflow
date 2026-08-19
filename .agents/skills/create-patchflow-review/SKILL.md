@@ -38,8 +38,8 @@ control.
    rationale, include every changed file in at least one step, and compose its
    body from ordered narrative blocks. Prefer domain and execution paths over
    generated or presentation-only files.
-8. Write the artifact, validate it, and report its path plus the recorded base
-   and target SHAs.
+8. Write the artifact, validate it, and report its artifact path, Patchflow
+   browser `reference`, and recorded base and target SHAs.
 
 ## Create the artifact
 
@@ -57,6 +57,20 @@ when the current directory or detected comparison is not the intended one.
 Successful JSON contains `path`, `reference`, `base_sha`, and `target_sha`.
 Read the `errors` array on a non-zero exit, correct the named repository/ref
 problem, and retry; do not guess or manually assemble commit identifiers.
+
+When Patchflow itself is running through the repository's Docker Compose
+development setup, execute the bundled CLI inside that container so creation
+uses the same mounted paths and persistent config as the web application:
+
+```sh
+docker compose exec -T -w /workspace/<repository> app \
+  patchflow create --format json
+```
+
+Replace `<repository>` with the repository's mounted container path. Do not use
+a host-only path inside the container. The Compose environment shares
+`PATCHFLOW_CONFIG_PATH` with the server, so the returned `reference` becomes
+discoverable in the running UI without a repository-picker step.
 
 When using an installed Patchflow executable, use its equivalent `create`
 command. Enrich the generated `review.yaml` and `overview.md` in place without
@@ -192,6 +206,11 @@ must exactly match their Git diff, code ranges must be readable, and every
 overview, diagram, and image asset must exist. Treat each returned `errors`
 entry as an independent repair instruction and rerun validation until
 `valid: true`.
+
+On success, hand the reviewer the `reference` returned by `create` (or the
+equivalent reference retained from that output) alongside the final artifact
+path and immutable SHAs. Do not make the reviewer reconstruct the review URL or
+Git comparison manually.
 
 Otherwise perform every invariant check in the bundled contract. Fix all
 validation errors before handing off. Finally inspect `git status --short` and
