@@ -99,9 +99,10 @@ range with one marker, and the same thread cannot be opened in duplicate.
 Human-authored comments can be edited without changing their stable IDs.
 Patchflow pre-fills the reviewer name from the selected repository's effective
 `git config user.name`; `Reviewer` is used only when Git has no configured name.
-Comment creation, replies, edits, and resolution changes replace only their own
-review block through Turbo Frames, preserving the surrounding chapter and
-scroll position.
+Comment creation, replies, edits, and resolution changes update their matching
+discussion through targeted Turbo Streams. Open popovers, the surrounding
+chapter, and the reader's scroll position remain in place, while the submitting
+control exposes a compact loading state.
 
 Generated `.patchflow` artifacts are excluded from the diff under review by
 default, preventing Patchflow from reviewing its own output.

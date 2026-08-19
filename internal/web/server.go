@@ -128,6 +128,10 @@ type CodeLine struct {
 // ThreadView is one discussion rendered beneath its addressed evidence block.
 type ThreadView struct {
 	ID               string
+	TargetType       string
+	TargetSide       string
+	TargetStartLine  int
+	TargetEndLine    int
 	TargetLabel      string
 	ReferencePath    string
 	ReferenceLabel   string
@@ -139,6 +143,19 @@ type ThreadView struct {
 	Resolved         bool
 	Focused          bool
 	Comments         []CommentView
+}
+
+// TurboThreadUpdateView renders one thread into every matching live representation.
+type TurboThreadUpdateView struct {
+	Targets string
+	Thread  ThreadView
+}
+
+// TurboThreadCreateView appends a thread and turns its originating draft into feedback.
+type TurboThreadCreateView struct {
+	ListTargets string
+	DraftID     string
+	Thread      ThreadView
 }
 
 // CommentView is one human or agent message with a stable reference path.
@@ -593,6 +610,17 @@ func (a *App) createThread(w http.ResponseWriter, r *http.Request) {
 			StartLine: startLine, EndLine: endLine, Author: r.FormValue("author"), AuthorKind: "human", Body: r.FormValue("body"),
 		})
 		if createErr == nil {
+			if wantsTurboStream(r) && validDOMID(r.FormValue("draft_id")) {
+				view, viewErr := a.threadView(repository, store, parts[1], thread.ID)
+				if viewErr == nil {
+					a.renderTurboStream(w, "turbo_thread_create", TurboThreadCreateView{
+						ListTargets: "[data-thread-list-for=\"" + parts[3] + "\"]",
+						DraftID:     r.FormValue("draft_id"),
+						Thread:      view,
+					})
+					return
+				}
+			}
 			redirect(w, r, "/reviews/"+parts[1]+"/threads/"+thread.ID, "notice", "Comment saved.")
 			return
 		}
@@ -624,6 +652,13 @@ func (a *App) createReply(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		created, replyErr := (&patchreview.DiscussionService{Store: store}).Reply(parts[1], parts[3], patchreview.NewReply{ReplyTo: r.FormValue("reply_to"), Author: r.FormValue("author"), AuthorKind: "human", Body: r.FormValue("body")})
 		if replyErr == nil {
+			if wantsTurboStream(r) {
+				view, viewErr := a.threadView(repository, store, parts[1], parts[3])
+				if viewErr == nil {
+					a.renderTurboStream(w, "turbo_thread_update", TurboThreadUpdateView{Targets: "[data-comment-thread-id=\"" + parts[3] + "\"]", Thread: view})
+					return
+				}
+			}
 			redirect(w, r, "/reviews/"+parts[1]+"/comments/"+created.ID, "notice", "Reply saved.")
 			return
 		}
@@ -659,6 +694,17 @@ func (a *App) editComment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
+	if wantsTurboStream(r) {
+		location, findErr := store.FindComment(parts[1], parts[3])
+		if findErr == nil {
+			threadID := location.Discussion.Threads[location.ThreadIndex].ID
+			view, viewErr := a.threadView(repository, store, parts[1], threadID)
+			if viewErr == nil {
+				a.renderTurboStream(w, "turbo_thread_update", TurboThreadUpdateView{Targets: "[data-comment-thread-id=\"" + threadID + "\"]", Thread: view})
+				return
+			}
+		}
+	}
 	redirect(w, r, "/reviews/"+parts[1]+"/comments/"+parts[3], "notice", "Comment updated.")
 }
 
@@ -689,6 +735,13 @@ func (a *App) updateThreadResolution(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
+	}
+	if wantsTurboStream(r) {
+		view, viewErr := a.threadView(repository, store, parts[1], parts[3])
+		if viewErr == nil {
+			a.renderTurboStream(w, "turbo_thread_update", TurboThreadUpdateView{Targets: "[data-comment-thread-id=\"" + parts[3] + "\"]", Thread: view})
+			return
+		}
 	}
 	message := "Thread reopened."
 	if resolved {
@@ -750,46 +803,69 @@ func buildThreadViews(reviewID, blockID, reviewerName string, discussion *artifa
 		if thread.Target.BlockID != blockID {
 			continue
 		}
-		view := ThreadView{
-			ID:               thread.ID,
-			TargetLabel:      threadTargetLabel(thread.Target),
-			ReferencePath:    "/reviews/" + reviewID + "/threads/" + thread.ID,
-			ReferenceLabel:   "thread " + thread.ID,
-			ReplyAction:      "/reviews/" + reviewID + "/threads/" + thread.ID + "/replies",
-			ResolutionAction: "/reviews/" + reviewID + "/threads/" + thread.ID + "/resolution",
-			ReviewerName:     reviewerName,
-			Resolved:         thread.Resolved,
-			Focused:          thread.ID == focusedThreadID,
-		}
-		if thread.Resolved {
-			view.ResolutionLabel = "Reopen"
-			view.ResolutionValue = "false"
-		} else {
-			view.ResolutionLabel = "Resolve"
-			view.ResolutionValue = "true"
-		}
+		view := buildThreadView(reviewID, reviewerName, thread, focusedThreadID, focusedCommentID)
 		if thread.Target.Type == "code" {
 			anchors = append(anchors, map[string]any{"id": thread.ID, "side": thread.Target.Side, "start": thread.Target.StartLine, "end": thread.Target.EndLine})
-		}
-		for _, comment := range thread.Comments {
-			view.Comments = append(view.Comments, CommentView{
-				ID:             comment.ID,
-				Author:         comment.Author,
-				AuthorKind:     comment.AuthorKind,
-				Body:           comment.Body,
-				CreatedAt:      comment.CreatedAt,
-				UpdatedAt:      comment.UpdatedAt,
-				EditAction:     "/reviews/" + reviewID + "/comments/" + comment.ID + "/edit",
-				ReferencePath:  "/reviews/" + reviewID + "/comments/" + comment.ID,
-				ReferenceLabel: "comment " + comment.ID,
-				CanEdit:        comment.AuthorKind == "human",
-				Focused:        comment.ID == focusedCommentID,
-			})
 		}
 		views = append(views, view)
 	}
 	encoded, _ := json.Marshal(anchors)
 	return views, string(encoded)
+}
+
+// buildThreadView maps one persisted thread into reusable page and Turbo content.
+func buildThreadView(reviewID, reviewerName string, thread artifact.Thread, focusedThreadID, focusedCommentID string) ThreadView {
+	view := ThreadView{
+		ID:               thread.ID,
+		TargetType:       thread.Target.Type,
+		TargetSide:       thread.Target.Side,
+		TargetStartLine:  thread.Target.StartLine,
+		TargetEndLine:    thread.Target.EndLine,
+		TargetLabel:      threadTargetLabel(thread.Target),
+		ReferencePath:    "/reviews/" + reviewID + "/threads/" + thread.ID,
+		ReferenceLabel:   "thread " + thread.ID,
+		ReplyAction:      "/reviews/" + reviewID + "/threads/" + thread.ID + "/replies",
+		ResolutionAction: "/reviews/" + reviewID + "/threads/" + thread.ID + "/resolution",
+		ReviewerName:     reviewerName,
+		Resolved:         thread.Resolved,
+		Focused:          thread.ID == focusedThreadID,
+	}
+	if thread.Resolved {
+		view.ResolutionLabel = "Reopen"
+		view.ResolutionValue = "false"
+	} else {
+		view.ResolutionLabel = "Resolve"
+		view.ResolutionValue = "true"
+	}
+	for _, comment := range thread.Comments {
+		view.Comments = append(view.Comments, CommentView{
+			ID:             comment.ID,
+			Author:         comment.Author,
+			AuthorKind:     comment.AuthorKind,
+			Body:           comment.Body,
+			CreatedAt:      comment.CreatedAt,
+			UpdatedAt:      comment.UpdatedAt,
+			EditAction:     "/reviews/" + reviewID + "/comments/" + comment.ID + "/edit",
+			ReferencePath:  "/reviews/" + reviewID + "/comments/" + comment.ID,
+			ReferenceLabel: "comment " + comment.ID,
+			CanEdit:        comment.AuthorKind == "human",
+			Focused:        comment.ID == focusedCommentID,
+		})
+	}
+	return view
+}
+
+// threadView reloads one persisted thread after mutation for an inline response.
+func (a *App) threadView(repository *gitrepo.Repository, store *patchreview.Store, reviewID, threadID string) (ThreadView, error) {
+	location, err := store.FindThread(reviewID, threadID)
+	if err != nil {
+		return ThreadView{}, err
+	}
+	reviewerName, err := repository.UserName()
+	if err != nil {
+		reviewerName = "Reviewer"
+	}
+	return buildThreadView(reviewID, reviewerName, location.Discussion.Threads[location.ThreadIndex], "", ""), nil
 }
 
 // threadTargetLabel describes an anchor without requiring the source block beside it.
@@ -884,6 +960,19 @@ func (a *App) renderPartial(w http.ResponseWriter, name, templateName string, va
 	_, _ = buffer.WriteTo(w)
 }
 
+// renderTurboStream writes one targeted mutation response from the shared chapter templates.
+func (a *App) renderTurboStream(w http.ResponseWriter, templateName string, value any) {
+	var buffer bytes.Buffer
+	if err := a.templates["chapter"].ExecuteTemplate(&buffer, templateName, value); err != nil {
+		a.logger.Error("render Turbo Stream", "template", templateName, "error", err)
+		http.Error(w, "Could not update discussion", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/vnd.turbo-stream.html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = buffer.WriteTo(w)
+}
+
 // securityHeaders sets the browser policy for embedded local assets and scripts.
 func (a *App) securityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
@@ -951,6 +1040,25 @@ func validMutationOrigin(r *http.Request) bool {
 	}
 	parsed, err := url.Parse(origin)
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host == r.Host
+}
+
+// wantsTurboStream reports whether Turbo requested an inline mutation response.
+func wantsTurboStream(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "text/vnd.turbo-stream.html")
+}
+
+// validDOMID accepts the conservative identifier alphabet used by dynamic draft targets.
+func validDOMID(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '-' || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // discoverBrowseRoot chooses the narrowest useful root for the repository picker.

@@ -393,6 +393,7 @@ textarea { min-height: 92px; resize: vertical; }
 [data-comment-line].is-comment-selected { background: var(--color-comment-marker-soft) !important; box-shadow: inset 3px 0 var(--color-comment-marker); }
 
 .discussion-panel { padding: 18px 20px 20px; border-top: 1px solid var(--color-border); background: var(--color-surface-muted); }
+.discussion-panel:has(.thread-list:empty) { display: none; }
 .review-block--prose > .discussion-panel, .callout > .discussion-panel, .review-question > .discussion-panel, .chapter-takeaway > .discussion-panel { margin-top: 18px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); }
 .thread-list { display: grid; gap: 14px; margin-bottom: 14px; }
 .comment-thread { overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-xs); }
@@ -429,6 +430,9 @@ textarea { min-height: 92px; resize: vertical; }
 .comment-form { display: grid; gap: 12px; padding: 14px; }
 .comment-form textarea { min-height: 82px; }
 .comment-form .button { justify-self: start; }
+.comment-form[aria-busy="true"] .button, .comment-thread__actions form[aria-busy="true"] button { opacity: .72; cursor: wait; }
+.comment-form[aria-busy="true"] .button::before { width: 10px; height: 10px; content: ""; border: 2px solid currentColor; border-right-color: transparent; border-radius: var(--radius-pill); animation: comment-submit-spin .7s linear infinite; }
+@keyframes comment-submit-spin { to { transform: rotate(360deg); } }
 .comment-selection { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: var(--radius-sm); color: var(--color-info); background: var(--color-comment-marker-soft); font: 700 11px var(--font-mono); }
 .button-link { padding: 0; border: 0; color: var(--color-accent); background: transparent; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .line-fields { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }

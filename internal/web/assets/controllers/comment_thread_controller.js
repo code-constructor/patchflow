@@ -8,12 +8,16 @@ export default class extends Controller {
   connect() {
     this.trackLineSelection = this.trackLineSelection.bind(this)
     this.finishLineSelection = this.finishLineSelection.bind(this)
-    this.markAnchoredLines()
+    this.handleDiscussionMutations = this.handleDiscussionMutations.bind(this)
+    this.discussionObserver = new MutationObserver(this.handleDiscussionMutations)
+    this.discussionObserver.observe(this.element, { childList: true, subtree: true })
+    this.refreshDiscussionState()
   }
 
   /** disconnect releases pointer handlers and closes top-layer windows owned by this block. */
   disconnect() {
     this.stopTrackingLines()
+    this.discussionObserver?.disconnect()
     for (const popover of this.element.querySelectorAll(".comment-popover:popover-open")) popover.hidePopover()
   }
 
@@ -46,6 +50,8 @@ export default class extends Controller {
   revealComposer(anchor, selection) {
     const fragment = this.composerTemplateTarget.content.cloneNode(true)
     const composer = fragment.querySelector(".comment-composer")
+    composer.id = `comment-draft-${crypto.randomUUID()}`
+    composer.querySelector("form").elements.draft_id.value = composer.id
     this.configureComposer(composer, selection)
     this.element.append(composer)
     composer.showPopover()
@@ -84,7 +90,7 @@ export default class extends Controller {
   openBlockThreads(event) {
     event.preventDefault()
     event.stopPropagation()
-    const threadIDs = [...this.element.querySelectorAll(".comment-thread[data-comment-thread-id]")]
+    const threadIDs = [...this.element.querySelectorAll(".discussion-panel .comment-thread[data-comment-thread-id]")]
       .map((thread) => thread.dataset.commentThreadId)
     this.revealThreads(event.currentTarget, threadIDs)
   }
@@ -134,7 +140,6 @@ export default class extends Controller {
     for (const thread of threads) {
       const clone = thread.cloneNode(true)
       clone.removeAttribute("id")
-      clone.removeAttribute("data-comment-thread-id")
       for (const identified of clone.querySelectorAll("[id]")) identified.removeAttribute("id")
       list.append(clone)
     }
@@ -152,8 +157,50 @@ export default class extends Controller {
 
   /** threadElement returns the original rendered card for one stable thread ID. */
   threadElement(threadID) {
-    return [...this.element.querySelectorAll(".comment-thread[data-comment-thread-id]")]
+    return [...this.element.querySelectorAll(".discussion-panel .comment-thread[data-comment-thread-id]")]
       .find((thread) => thread.dataset.commentThreadId === threadID)
+  }
+
+  /** handleDiscussionMutations refreshes only when a Turbo Stream adds discussion data. */
+  handleDiscussionMutations(mutations) {
+    const addedDiscussion = mutations.some((mutation) => [...mutation.addedNodes].some((node) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) return false
+      return node.matches(".comment-thread, [data-comment-saved-thread-id]") || node.querySelector(".comment-thread, [data-comment-saved-thread-id]")
+    }))
+    if (addedDiscussion) this.refreshDiscussionState()
+  }
+
+  /** refreshDiscussionState promotes saved drafts and synchronizes controls after Turbo Streams. */
+  refreshDiscussionState() {
+    for (const saved of this.element.querySelectorAll("[data-comment-saved-thread-id]")) {
+      const popover = saved.closest(".comment-popover")
+      if (!popover || popover.classList.contains("thread-popover")) continue
+      popover.classList.remove("comment-composer")
+      popover.classList.add("thread-popover")
+      popover.dataset.threadIds = JSON.stringify([saved.dataset.commentSavedThreadId])
+      delete popover.dataset.commentDraftSide
+      delete popover.dataset.commentDraftStart
+      delete popover.dataset.commentDraftEnd
+    }
+    const persistedThreads = this.element.querySelectorAll(".discussion-panel .comment-thread[data-comment-thread-id]")
+    const blockAction = this.element.querySelector(".block-thread-action")
+    if (blockAction) blockAction.hidden = persistedThreads.length === 0
+    this.markAnchoredLines()
+    this.markSelectedLines()
+  }
+
+  /** threadAnchors merges initial evidence with threads appended by Turbo Streams. */
+  threadAnchors() {
+    const anchors = new Map(this.anchorsValue.map((anchor) => [anchor.id, anchor]))
+    for (const thread of this.element.querySelectorAll(".discussion-panel .comment-thread[data-comment-target-type='code']")) {
+      anchors.set(thread.dataset.commentThreadId, {
+        id: thread.dataset.commentThreadId,
+        side: thread.dataset.commentSide,
+        start: Number.parseInt(thread.dataset.commentStart, 10),
+        end: Number.parseInt(thread.dataset.commentEnd, 10),
+      })
+    }
+    return [...anchors.values()]
   }
 
   /** positionPopover anchors a window to document coordinates so scrolling leaves it behind. */
@@ -336,9 +383,10 @@ export default class extends Controller {
 
   /** markAnchoredLines highlights source lines and adds controls for persisted discussions. */
   markAnchoredLines() {
+    const persistedAnchors = this.threadAnchors()
     for (const element of this.element.querySelectorAll("[data-comment-line][data-comment-side]")) {
       const line = Number.parseInt(element.dataset.commentLine, 10)
-      const anchors = this.anchorsValue.filter((anchor) => anchor.side === element.dataset.commentSide && line >= anchor.start && line <= anchor.end)
+      const anchors = persistedAnchors.filter((anchor) => anchor.side === element.dataset.commentSide && line >= anchor.start && line <= anchor.end)
       element.classList.toggle("has-comment-thread", anchors.length > 0)
       element.classList.toggle("is-comment-thread-start", anchors.some((anchor) => anchor.start === line))
       element.classList.toggle("is-comment-thread-end", anchors.some((anchor) => anchor.end === line))

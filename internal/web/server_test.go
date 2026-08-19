@@ -52,8 +52,11 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 			t.Errorf("chapter comment action missing %q", expected)
 		}
 	}
-	if strings.Contains(chapter.Body.String(), "class=\"discussion-panel\"") {
-		t.Error("empty discussion panels must not interrupt the reading flow")
+	if !strings.Contains(chapter.Body.String(), "data-thread-list-for=\"domain-intro\"") {
+		t.Error("chapter is missing the empty inline discussion target")
+	}
+	if !strings.Contains(chapter.Body.String(), "data-turbo-stream") || !strings.Contains(chapter.Body.String(), "data-turbo-submits-with=\"Saving…\"") {
+		t.Error("comment forms must request inline streams and expose their loading state")
 	}
 	if strings.Contains(chapter.Body.String(), "href=\""+reviewPath+"/blocks/domain-intro\"") {
 		t.Error("block copy control must not navigate")
@@ -97,7 +100,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		t.Fatalf("diff layout is not URL-backed: %d", diffController.Code)
 	}
 	styles := perform(app, http.MethodGet, "/assets/styles/application.css", "")
-	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", "--color-comment-marker:", ".chapter-rail { position: sticky", ".callout, .review-question, .chapter-takeaway { width: 100%", ".discussion-panel"} {
+	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", "--color-comment-marker:", ".chapter-rail { position: sticky", ".callout, .review-question, .chapter-takeaway { width: 100%", ".discussion-panel:has(.thread-list:empty)", "comment-submit-spin"} {
 		if !strings.Contains(styles.Body.String(), expected) {
 			t.Errorf("theme stylesheet missing %q", expected)
 		}
@@ -124,10 +127,10 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 	reviewPath := strings.Split(created.Header().Get("Location"), "?")[0]
 	reviewID := strings.TrimPrefix(reviewPath, "/reviews/")
 
-	opening := perform(app, http.MethodPost, reviewPath+"/blocks/domain-intro/threads", url.Values{
-		"target_type": {"block"}, "author": {"Patchflow Test"}, "body": {"Please explain this boundary."},
+	opening := performTurbo(app, http.MethodPost, reviewPath+"/blocks/domain-intro/threads", url.Values{
+		"target_type": {"block"}, "author": {"Patchflow Test"}, "body": {"Please explain this boundary."}, "draft_id": {"comment-draft-test"},
 	}.Encode())
-	if opening.Code != http.StatusSeeOther || !strings.Contains(opening.Header().Get("Location"), reviewPath+"/threads/thread-") {
+	if opening.Code != http.StatusOK || !strings.Contains(opening.Header().Get("Content-Type"), "text/vnd.turbo-stream.html") || !strings.Contains(opening.Body.String(), "action=\"append\"") || !strings.Contains(opening.Body.String(), "target=\"comment-draft-test\"") {
 		t.Fatalf("block comment failed: %d %s", opening.Code, opening.Body.String())
 	}
 	store, _ := patchreview.NewStore(repository, nil)
@@ -144,8 +147,8 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 		}
 	}
 
-	edited := perform(app, http.MethodPost, reviewPath+"/comments/"+thread.Comments[0].ID+"/edit", url.Values{"body": {"Please explain the ownership boundary."}}.Encode())
-	if edited.Code != http.StatusSeeOther || !strings.Contains(edited.Header().Get("Location"), reviewPath+"/comments/"+thread.Comments[0].ID) {
+	edited := performTurbo(app, http.MethodPost, reviewPath+"/comments/"+thread.Comments[0].ID+"/edit", url.Values{"body": {"Please explain the ownership boundary."}}.Encode())
+	if edited.Code != http.StatusOK || !strings.Contains(edited.Header().Get("Content-Type"), "text/vnd.turbo-stream.html") || !strings.Contains(edited.Body.String(), "data-comment-thread-id") || !strings.Contains(edited.Body.String(), "Please explain the ownership boundary.") {
 		t.Fatalf("comment edit failed: %d %s", edited.Code, edited.Body.String())
 	}
 	discussion, _ = store.ReadDiscussion(stored)
@@ -157,12 +160,12 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 		t.Fatalf("edited comment cannot be reopened: %d %s", editedPage.Code, editedPage.Body.String())
 	}
 
-	reply := perform(app, http.MethodPost, reviewPath+"/threads/"+thread.ID+"/replies", url.Values{"author": {"Reviewer 2"}, "body": {"The service owns the persistence boundary."}}.Encode())
-	if reply.Code != http.StatusSeeOther || !strings.Contains(reply.Header().Get("Location"), reviewPath+"/comments/comment-") {
+	reply := performTurbo(app, http.MethodPost, reviewPath+"/threads/"+thread.ID+"/replies", url.Values{"author": {"Reviewer 2"}, "body": {"The service owns the persistence boundary."}}.Encode())
+	if reply.Code != http.StatusOK || !strings.Contains(reply.Body.String(), "The service owns the persistence boundary.") || !strings.Contains(reply.Body.String(), "action=\"update\"") {
 		t.Fatalf("reply failed: %d %s", reply.Code, reply.Body.String())
 	}
-	resolved := perform(app, http.MethodPost, reviewPath+"/threads/"+thread.ID+"/resolution", url.Values{"resolved": {"true"}}.Encode())
-	if resolved.Code != http.StatusSeeOther {
+	resolved := performTurbo(app, http.MethodPost, reviewPath+"/threads/"+thread.ID+"/resolution", url.Values{"resolved": {"true"}}.Encode())
+	if resolved.Code != http.StatusOK || !strings.Contains(resolved.Body.String(), "Resolved thread") || !strings.Contains(resolved.Body.String(), ">Reopen</button>") {
 		t.Fatalf("resolve failed: %d %s", resolved.Code, resolved.Body.String())
 	}
 	discussion, _ = store.ReadDiscussion(stored)
@@ -314,6 +317,16 @@ func perform(handler http.Handler, method, path, body string) *httptest.Response
 	if method == http.MethodPost {
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+// performTurbo sends one in-memory request that asks for a targeted Turbo Stream response.
+func performTurbo(handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "text/vnd.turbo-stream.html, text/html")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response

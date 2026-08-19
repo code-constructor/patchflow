@@ -123,8 +123,9 @@ review narrative remains stable. The browser offers icon-triggered whole-block
 comments, pointer-drag source ranges, independently anchored draft windows,
 reopenable contextual discussions in code and diff blocks, editable human
 comments, replies, resolution, line markers, and copyable thread/comment paths.
-Each browser mutation replaces only its owning review-block Turbo Frame so the
-chapter and reading position remain stable. The CLI offers the same list, show,
+Each browser mutation updates only matching representations of its discussion
+through Turbo Streams. The chapter, reading position, open popover, and
+unrelated comment windows remain stable. The CLI offers the same list, show,
 create, reply, resolve, and reopen lifecycle for humans and agents.
 
 ### 12. Classic source review — planned
