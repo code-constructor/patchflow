@@ -15,8 +15,8 @@ import (
 
 // ReviewNavigationView describes the global views available within one review.
 type ReviewNavigationView struct {
-	ReviewID, ActiveView, PlanPath, FilesPath, MemoryKey, ReviewPath string
-	FileCount                                                        int
+	ReviewID, ActiveView, PlanPath, FilesPath, DiscussionsPath, MemoryKey, ReviewPath string
+	FileCount                                                                         int
 }
 
 // FilesView contains the complete changed-file tree and lazy continuous diff stream.
@@ -183,7 +183,7 @@ func reviewNavigationView(basePath string, stored *patchreview.Stored, activeVie
 	}
 	return &ReviewNavigationView{
 		ReviewID: stored.Review.ID, ActiveView: activeView, PlanPath: reviewPath,
-		FilesPath: filesPath, MemoryKey: repositoryScopeFromPath(basePath) + ":" + stored.Review.ID,
+		FilesPath: filesPath, DiscussionsPath: reviewPath + "/discussions", MemoryKey: repositoryScopeFromPath(basePath) + ":" + stored.Review.ID,
 		ReviewPath: reviewPath, FileCount: len(stored.Review.Change.Files),
 	}
 }

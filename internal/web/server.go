@@ -73,6 +73,7 @@ type Page struct {
 	Chapter          *ChapterView
 	ReviewNavigation *ReviewNavigationView
 	Files            *FilesView
+	Discussions      *DiscussionsView
 	PickerRoot       string
 }
 
@@ -271,7 +272,7 @@ func newApp(defaultRepository, settingsPath string, logger *slog.Logger) (*App, 
 		return nil, fmt.Errorf("parse common templates: %w", err)
 	}
 	templates := map[string]*template.Template{}
-	for _, name := range []string{"home", "new", "overview", "chapter", "files"} {
+	for _, name := range []string{"home", "new", "overview", "chapter", "files", "discussions"} {
 		page, cloneErr := common.Clone()
 		if cloneErr != nil {
 			return nil, cloneErr
@@ -358,6 +359,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.block(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/steps/"):
 		a.chapter(w, r)
+	case r.Method == http.MethodGet && matchDiscussionsPath(r.URL.Path):
+		a.discussions(w, r)
 	case r.Method == http.MethodGet && matchFilesPath(r.URL.Path):
 		a.files(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/reviews/"):
@@ -1459,7 +1462,7 @@ func pageWithNavigation(name string, page Page) Page {
 		}
 	case "new", "overview":
 		page.BackPath, page.BackLabel = page.BasePath, "Repository overview"
-	case "chapter", "files":
+	case "chapter", "files", "discussions":
 		if page.ReviewNavigation != nil {
 			page.BackPath, page.BackLabel = page.ReviewNavigation.ReviewPath, "Review overview"
 			page.ReviewHomePath = page.ReviewNavigation.ReviewPath

@@ -87,7 +87,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	basePath := strings.Split(reviewPath, "/reviews/")[0]
 
 	overview := perform(app, http.MethodGet, reviewPath, "")
-	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/steps/domain\"") || !strings.Contains(overview.Body.String(), "href=\"https://github.com/traqx-ai/patchflow\"") || !strings.Contains(overview.Body.String(), "aria-label=\"Open repository on GitHub\"") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/files/app/controllers/sessions_controller.rb\"") || !strings.Contains(overview.Body.String(), "data-review-tabs-view-value=\"plan\"") || !strings.Contains(overview.Body.String(), "data-navigation-fallback-value=\""+basePath+"\"") || !strings.Contains(overview.Body.String(), "data-action=\"navigation#back\"") {
+	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/steps/domain\"") || !strings.Contains(overview.Body.String(), "href=\"https://github.com/traqx-ai/patchflow\"") || !strings.Contains(overview.Body.String(), "aria-label=\"Open repository on GitHub\"") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/files/app/controllers/sessions_controller.rb\"") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/discussions\"") || !strings.Contains(overview.Body.String(), "data-review-tabs-view-value=\"plan\"") || !strings.Contains(overview.Body.String(), "data-navigation-fallback-value=\""+basePath+"\"") || !strings.Contains(overview.Body.String(), "data-action=\"navigation#back\"") {
 		t.Fatalf("unexpected overview: %d %s", overview.Code, overview.Body.String())
 	}
 
@@ -107,6 +107,10 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 	if !strings.Contains(chapter.Body.String(), "data-turbo-stream") || !strings.Contains(chapter.Body.String(), "data-turbo-submits-with=\"Saving…\"") {
 		t.Error("comment forms must request inline streams and expose their loading state")
+	}
+	emptyDiscussions := perform(app, http.MethodGet, reviewPath+"/discussions", "")
+	if emptyDiscussions.Code != http.StatusOK || !strings.Contains(emptyDiscussions.Body.String(), "data-review-tabs-view-value=\"discussions\"") || !strings.Contains(emptyDiscussions.Body.String(), "class=\"review-tab is-active\"") || !strings.Contains(emptyDiscussions.Body.String(), "The review has no annotations.") {
+		t.Fatalf("empty discussions view failed: %d %s", emptyDiscussions.Code, emptyDiscussions.Body.String())
 	}
 	if strings.Contains(chapter.Body.String(), "href=\""+reviewPath+"/blocks/domain-intro\"") {
 		t.Error("block copy control must not navigate")
@@ -308,6 +312,12 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 	for _, expected := range []string{"These two lines belong together.", "data-comment-start=\"1\"", "data-comment-end=\"2\"", "data-comment-thread-id=\"" + discussion.Threads[1].ID + "\""} {
 		if !strings.Contains(classicFileView.Body.String(), expected) {
 			t.Errorf("classic file view missing shared discussion %q", expected)
+		}
+	}
+	discussionsPage := perform(app, http.MethodGet, reviewPath+"/discussions", "")
+	for _, expected := range []string{"data-review-tabs-view-value=\"discussions\"", "2 discussions", "Understand domain behavior", "Inspect security-sensitive behavior", "Please explain the ownership boundary.", "These two lines belong together.", "data-comment-thread-id=\"" + thread.ID + "\"", "data-comment-thread-id=\"" + discussion.Threads[1].ID + "\"", "Open block →", "action=\"" + reviewPath + "/threads/" + thread.ID + "/replies\"", "action=\"" + reviewPath + "/threads/" + thread.ID + "/resolution\""} {
+		if !strings.Contains(discussionsPage.Body.String(), expected) {
+			t.Errorf("discussions page missing %q", expected)
 		}
 	}
 
