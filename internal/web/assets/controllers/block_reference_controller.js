@@ -10,7 +10,7 @@ export default class extends Controller {
       await navigator.clipboard.writeText(this.pathValue)
       this.showCopied()
     } catch (_error) {
-      this.statusTarget.textContent = "Block path could not be copied"
+      this.statusTarget.textContent = "Reference path could not be copied"
       this.element.title = "Copy failed"
     }
   }
@@ -21,7 +21,7 @@ export default class extends Controller {
     this.copyIconTarget.hidden = true
     this.copiedIconTarget.hidden = false
     this.statusTarget.textContent = `Copied ${this.pathValue}`
-    this.element.title = "Block path copied"
+    this.element.title = "Reference path copied"
     this.element.classList.add("is-copied")
     this.resetTimer = window.setTimeout(() => this.reset(), 1800)
   }
@@ -31,7 +31,7 @@ export default class extends Controller {
     this.copyIconTarget.hidden = false
     this.copiedIconTarget.hidden = true
     this.statusTarget.textContent = ""
-    this.element.title = "Copy block path"
+    this.element.title = "Copy reference path"
     this.element.classList.remove("is-copied")
   }
 

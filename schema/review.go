@@ -7,3 +7,8 @@ import _ "embed"
 //
 //go:embed patchflow-review-v2.schema.json
 var ReviewV2 []byte
+
+// CommentsV1 is the canonical JSON Schema for persisted Patchflow discussions.
+//
+//go:embed patchflow-comments-v1.schema.json
+var CommentsV1 []byte

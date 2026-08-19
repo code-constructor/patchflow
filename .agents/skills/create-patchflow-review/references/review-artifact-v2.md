@@ -70,7 +70,9 @@ steps:
 ```
 
 Create `overview.md` beside `review.yaml`. Put Mermaid files below `diagrams/`.
-The v2 artifact has no `annotations` or `decisions` fields.
+The v2 narrative has no `annotations`, replies, or `decisions` fields. Persisted
+discussion uses the separate `comments.yaml` contract; never add its fields to
+`review.yaml`.
 
 Apply these invariants:
 

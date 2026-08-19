@@ -78,6 +78,7 @@ export default class extends Controller {
     })
     this.updateButtons()
     this.applySyntaxHighlighting()
+    this.element.dispatchEvent(new CustomEvent("patchflow:diff-rendered", { bubbles: true }))
   }
 
   /** Keeps the layout controls and their accessibility state in sync. */

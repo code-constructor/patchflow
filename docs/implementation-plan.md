@@ -16,15 +16,22 @@ a committed base branch from beginning to end:
 8. Provide a Coding Agent skill that can create and enrich the same artifact.
 9. Make every block directly addressable and keep shareable reading state in
    the URL.
+10. Persist addressable block and source-range discussions shared by UI, CLI,
+    and Coding Agents.
 
 This slice intentionally supports committed text changes in local repositories.
-Working-tree changes, hosted pull-request import, interactive comment threads,
-binary viewers, large-diff virtualization, and multi-user review are later work.
+Working-tree changes, hosted pull-request import, binary viewers, large-diff
+virtualization, and multi-user review are later work.
 
 ## Architecture boundaries
 
 - The review artifact is the source of truth. Patchflow has no application
-  database; repository selection is a local browser cookie.
+  database; a short repository identity lives in the URL path while its local
+  path and last-opened time live in a versioned, atomic user configuration under
+  the operating system's config directory. Multiple repository reviews can
+  therefore remain open independently across tabs, browsers, and restarts. The
+  root dashboard rebuilds its list from that file and remains the navigation
+  point for opening additional work.
 - Git commands live behind a service boundary and receive argument arrays, not
   shell-interpolated commands.
 - Refs resolve to SHAs before diffing. Artifacts never silently follow a moving
@@ -36,6 +43,9 @@ binary viewers, large-diff virtualization, and multi-user review are later work.
   deterministic baseline; a Coding Agent can replace it with a richer plan by
   producing the same artifact format.
 - Generated `.patchflow` content is excluded from the reviewed diff by default.
+- Review pages derive an optional GitHub repository or pull-request shortcut
+  from local remote and target-ref metadata, without adding a hosted-service
+  API dependency.
 - The Go application, schema, fixtures, documentation, embedded frontend, and
   Coding Agent skill live in one monorepo.
 
@@ -101,7 +111,7 @@ as a stable block resource path instead of browser storage. Give chapters a
 review question, attention map, decision gate when critical, sticky block
 navigation, explicit takeaway, and a noise budget for mechanical evidence.
 
-### 11. Addressable comment threads — next
+### 11. Addressable comment threads — complete
 
 Let reviewers and agents discuss the evidence in place. A thread can target a
 whole narrative block or an immutable code anchor made from the reviewed commit,
@@ -115,6 +125,16 @@ the CLI must be able to list and inspect threads, create comments, and append
 replies so Coding Agents can participate without browser automation. Validate
 all references against the immutable review source, write updates atomically,
 and preserve author, creation time, resolution state, and reply order.
+
+Store the mutable discussion in a separately versioned `comments.yaml` so the
+review narrative remains stable. The browser offers icon-triggered whole-block
+comments, pointer-drag source ranges, independently anchored draft windows,
+reopenable contextual discussions in code and diff blocks, editable human
+comments, replies, resolution, line markers, and copyable thread/comment paths.
+Each browser mutation updates only matching representations of its discussion
+through Turbo Streams. The chapter, reading position, open popover, and
+unrelated comment windows remain stable. The CLI offers the same list, show,
+create, reply, resolve, and reopen lifecycle for humans and agents.
 
 ### 12. Classic source review — planned
 
@@ -134,3 +154,6 @@ a reviewer can create a review, follow a rationale-backed story containing
 explanation and focused code, switch between split and unified diffs, restart
 Patchflow, and recover the review from a commit-ready
 `.patchflow/reviews/<review-id>` artifact tied to the same base and target SHAs.
+The reviewer can leave a comment on a block or immutable source range, receive
+an agent reply through the CLI, restart Patchflow, and recover the same IDs,
+reply order, anchors, and resolution state from `comments.yaml`.

@@ -1,5 +1,5 @@
 {{define "content"}}
-<div class="breadcrumb"><a href="/reviews/{{.Chapter.ReviewID}}">← Review overview</a></div>
+<div class="breadcrumb"><a href="{{.Chapter.BasePath}}/reviews/{{.Chapter.ReviewID}}">← Review overview</a></div>
 <section class="row row--between chapter-heading"><div><div class="eyebrow">Step {{.Chapter.Number}} of {{.Chapter.Total}}</div><h2>{{.Chapter.Title}}</h2><p class="lede">{{.Chapter.Rationale}}</p>{{if .Chapter.Attention}}<div class="attention-list" aria-label="Review attention">{{range .Chapter.Attention}}<span class="attention attention--{{.}}">{{.}}</span>{{end}}</div>{{end}}</div><span class="priority priority--{{.Chapter.Priority}}">{{.Chapter.Priority}} priority</span></section>
 {{if .Chapter.ReviewQuestion}}<section class="review-question-card section"><div class="eyebrow">Review question</div><strong>{{.Chapter.ReviewQuestion}}</strong></section>{{end}}
 {{if .Chapter.DesignGate}}<aside class="design-gate"><div class="eyebrow">Decision gate</div><p>If the answer changes the direction of the change, pause here before reviewing implementation details.</p></aside>{{end}}
@@ -9,5 +9,5 @@
   </aside>
   <main class="review-chapter">{{range .Chapter.Blocks}}{{template "block" .}}{{end}}</main>
 </div>
-<nav class="step-nav"><div>{{if .Chapter.Previous}}<a class="button button--quiet" href="/reviews/{{.Chapter.ReviewID}}/steps/{{.Chapter.Previous.ID}}" data-preserve-diff-mode>← {{.Chapter.Previous.Title}}</a>{{end}}</div><div>{{if .Chapter.Next}}<a class="button" href="/reviews/{{.Chapter.ReviewID}}/steps/{{.Chapter.Next.ID}}" data-preserve-diff-mode>{{.Chapter.Next.Title}} →</a>{{end}}</div></nav>
+<nav class="step-nav"><div>{{if .Chapter.Previous}}<a class="button button--quiet" href="{{.Chapter.BasePath}}/reviews/{{.Chapter.ReviewID}}/steps/{{.Chapter.Previous.ID}}" data-preserve-diff-mode>← {{.Chapter.Previous.Title}}</a>{{end}}</div><div>{{if .Chapter.Next}}<a class="button" href="{{.Chapter.BasePath}}/reviews/{{.Chapter.ReviewID}}/steps/{{.Chapter.Next.ID}}" data-preserve-diff-mode>{{.Chapter.Next.Title}} →</a>{{end}}</div></nav>
 {{end}}

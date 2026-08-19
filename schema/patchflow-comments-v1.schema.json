@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchflow.dev/schema/patchflow-comments-v1.schema.json",
+  "title": "Patchflow Comments Artifact v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "review_id", "updated_at", "threads"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "review_id": { "$ref": "#/$defs/id" },
+    "updated_at": { "$ref": "#/$defs/timestamp" },
+    "threads": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/thread" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "thread": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "target", "resolved", "comments"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "target": {
+          "oneOf": [
+            { "$ref": "#/$defs/block_target" },
+            { "$ref": "#/$defs/code_target" }
+          ]
+        },
+        "resolved": { "type": "boolean" },
+        "comments": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/comment" }
+        }
+      }
+    },
+    "block_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "block_id"],
+      "properties": {
+        "type": { "const": "block" },
+        "block_id": { "$ref": "#/$defs/id" }
+      }
+    },
+    "code_target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "block_id", "path", "side", "commit_sha", "start_line", "end_line"],
+      "properties": {
+        "type": { "const": "code" },
+        "block_id": { "$ref": "#/$defs/id" },
+        "path": { "$ref": "#/$defs/text" },
+        "side": { "enum": ["base", "target"] },
+        "commit_sha": { "$ref": "#/$defs/sha" },
+        "start_line": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "author", "author_kind", "body", "created_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "author": { "$ref": "#/$defs/text" },
+        "author_kind": { "enum": ["human", "agent"] },
+        "body": { "$ref": "#/$defs/text" },
+        "created_at": { "$ref": "#/$defs/timestamp" },
+        "updated_at": { "$ref": "#/$defs/timestamp" },
+        "reply_to": { "$ref": "#/$defs/id" }
+      }
+    }
+  }
+}

@@ -19,8 +19,9 @@ var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 // Store owns safe persistence beneath a repository's .patchflow directory.
 type Store struct {
-	root      string
-	validator *artifact.Validator
+	root                string
+	validator           *artifact.Validator
+	discussionValidator *artifact.DiscussionValidator
 }
 
 // Stored couples a parsed review with its canonical review.yaml path.
@@ -34,6 +35,19 @@ type BlockLocation struct {
 	Stored    *Stored
 	StepIndex int
 	Block     artifact.Block
+}
+
+// ThreadLocation identifies an addressable discussion and its review context.
+type ThreadLocation struct {
+	Stored      *Stored
+	Discussion  *artifact.Discussion
+	ThreadIndex int
+}
+
+// CommentLocation identifies an addressable message and its containing thread.
+type CommentLocation struct {
+	ThreadLocation
+	CommentIndex int
 }
 
 // NotFoundError reports an absent review or review asset.
@@ -60,7 +74,11 @@ func NewStore(repositoryRoot string, validator *artifact.Validator) (*Store, err
 			return nil, err
 		}
 	}
-	return &Store{root: realRoot, validator: validator}, nil
+	discussionValidator, err := artifact.NewDiscussionValidator()
+	if err != nil {
+		return nil, err
+	}
+	return &Store{root: realRoot, validator: validator, discussionValidator: discussionValidator}, nil
 }
 
 // All returns valid reviews ordered from newest to oldest.
@@ -129,6 +147,109 @@ func (s *Store) FindBlock(reviewID, blockID string) (*BlockLocation, error) {
 		}
 	}
 	return nil, &NotFoundError{Message: fmt.Sprintf("Block %s does not exist in review %s", blockID, reviewID)}
+}
+
+// ReadDiscussion loads comments.yaml or returns an empty discussion before the first comment.
+func (s *Store) ReadDiscussion(stored *Stored) (*artifact.Discussion, error) {
+	directory, err := s.safeReviewDirectory(stored.Review.ID, false)
+	if err != nil {
+		return nil, err
+	}
+	commentsPath := filepath.Join(directory, "comments.yaml")
+	realPath, err := filepath.EvalSymlinks(commentsPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return &artifact.Discussion{SchemaVersion: 1, ReviewID: stored.Review.ID, UpdatedAt: stored.Review.CreatedAt, Threads: []artifact.Thread{}}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if filepath.Dir(realPath) != directory {
+		return nil, &UnsafePathError{Message: "Comments file escapes its artifact directory"}
+	}
+	source, err := os.ReadFile(realPath)
+	if err != nil {
+		return nil, err
+	}
+	discussion, err := s.discussionValidator.Parse(source)
+	if err != nil {
+		return nil, err
+	}
+	if discussion.ReviewID != stored.Review.ID {
+		return nil, &artifact.DiscussionValidationErrors{Errors: []string{"comments.yaml review_id must match review.yaml id"}}
+	}
+	if err := artifact.ValidateDiscussionForReview(stored.Review, discussion); err != nil {
+		return nil, err
+	}
+	return discussion, nil
+}
+
+// WriteDiscussion validates and atomically replaces one review's comments artifact.
+func (s *Store) WriteDiscussion(stored *Stored, discussion *artifact.Discussion) error {
+	if discussion.ReviewID != stored.Review.ID {
+		return &artifact.DiscussionValidationErrors{Errors: []string{"comments.yaml review_id must match review.yaml id"}}
+	}
+	if err := artifact.ValidateDiscussionForReview(stored.Review, discussion); err != nil {
+		return err
+	}
+	serialized, err := yaml.Marshal(discussion)
+	if err != nil {
+		return fmt.Errorf("encode comments artifact: %w", err)
+	}
+	if _, err := s.discussionValidator.Parse(serialized); err != nil {
+		return err
+	}
+	directory, err := s.safeReviewDirectory(stored.Review.ID, false)
+	if err != nil {
+		return err
+	}
+	commentsPath := filepath.Join(directory, "comments.yaml")
+	if info, err := os.Lstat(commentsPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return &UnsafePathError{Message: "Comments file must not be a symlink"}
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := atomicWrite(commentsPath, serialized); err != nil {
+		return fmt.Errorf("write comments artifact: %w", err)
+	}
+	return nil
+}
+
+// FindThread resolves a stable thread ID within one review.
+func (s *Store) FindThread(reviewID, threadID string) (*ThreadLocation, error) {
+	stored, err := s.Find(reviewID)
+	if err != nil {
+		return nil, err
+	}
+	discussion, err := s.ReadDiscussion(stored)
+	if err != nil {
+		return nil, err
+	}
+	for index := range discussion.Threads {
+		if discussion.Threads[index].ID == threadID {
+			return &ThreadLocation{Stored: stored, Discussion: discussion, ThreadIndex: index}, nil
+		}
+	}
+	return nil, &NotFoundError{Message: fmt.Sprintf("Thread %s does not exist in review %s", threadID, reviewID)}
+}
+
+// FindComment resolves a stable comment ID within one review.
+func (s *Store) FindComment(reviewID, commentID string) (*CommentLocation, error) {
+	stored, err := s.Find(reviewID)
+	if err != nil {
+		return nil, err
+	}
+	discussion, err := s.ReadDiscussion(stored)
+	if err != nil {
+		return nil, err
+	}
+	for threadIndex := range discussion.Threads {
+		for commentIndex := range discussion.Threads[threadIndex].Comments {
+			if discussion.Threads[threadIndex].Comments[commentIndex].ID == commentID {
+				return &CommentLocation{ThreadLocation: ThreadLocation{Stored: stored, Discussion: discussion, ThreadIndex: threadIndex}, CommentIndex: commentIndex}, nil
+			}
+		}
+	}
+	return nil, &NotFoundError{Message: fmt.Sprintf("Comment %s does not exist in review %s", commentID, reviewID)}
 }
 
 // Create validates and atomically writes the files that make up a new review.

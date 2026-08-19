@@ -33,6 +33,57 @@ func TestChangedFilesAndLiteralDiff(t *testing.T) {
 	}
 }
 
+// TestUserNameReadsEffectiveRepositoryConfiguration protects reviewer attribution.
+func TestUserNameReadsEffectiveRepositoryConfiguration(t *testing.T) {
+	directory := testRepository(t)
+	repository, err := Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := repository.UserName()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "Test" {
+		t.Fatalf("unexpected Git user name %q", name)
+	}
+}
+
+// TestGitHubReferenceNormalizesRemotesAndRecognizesPullRequestRefs covers local link discovery.
+func TestGitHubReferenceNormalizesRemotesAndRecognizesPullRequestRefs(t *testing.T) {
+	for remote, expected := range map[string]string{
+		"git@github.com:traqx-ai/patchflow.git":       "traqx-ai/patchflow",
+		"https://github.com/traqx-ai/patchflow.git":   "traqx-ai/patchflow",
+		"ssh://git@github.com/traqx-ai/patchflow.git": "traqx-ai/patchflow",
+		"git://github.com/traqx-ai/patchflow.git":     "traqx-ai/patchflow",
+	} {
+		actual, ok := parseGitHubRemote(remote)
+		if !ok || actual != expected {
+			t.Errorf("parseGitHubRemote(%q) = %q, %t", remote, actual, ok)
+		}
+	}
+	for _, remote := range []string{"git@gitlab.com:traqx-ai/patchflow.git", "https://example.com/owner/repository", "https://github.com/too/many/segments"} {
+		if _, ok := parseGitHubRemote(remote); ok {
+			t.Errorf("accepted non-GitHub repository %q", remote)
+		}
+	}
+
+	directory := testRepository(t)
+	runTestGit(t, directory, "remote", "add", "origin", "git@github.com:traqx-ai/patchflow.git")
+	repository, err := Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reference, err := repository.GitHubReference("refs/pull/42/head")
+	if err != nil || reference == nil || reference.URL != "https://github.com/traqx-ai/patchflow/pull/42" || !reference.PullRequest {
+		t.Fatalf("unexpected pull request reference: %#v %v", reference, err)
+	}
+	reference, err = repository.GitHubReference("feature")
+	if err != nil || reference == nil || reference.URL != "https://github.com/traqx-ai/patchflow" || reference.PullRequest {
+		t.Fatalf("unexpected repository reference: %#v %v", reference, err)
+	}
+}
+
 // TestDiffRejectsFilesOverDisplayLimit verifies the explicit large-diff boundary.
 func TestDiffRejectsFilesOverDisplayLimit(t *testing.T) {
 	directory := testRepository(t)

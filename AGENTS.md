@@ -42,8 +42,10 @@ Build a vertical slice before recreating a full GitHub-like diff viewer:
 3. Render a review overview with an ordered set of review steps.
 4. Show a simple unified text diff in the planned order.
 5. Compose chapters from prose, code, diff, callout, question, diagram, and
-   takeaway blocks. Interactive comments are intentionally deferred.
+   takeaway blocks.
 6. Render Markdown, Mermaid, syntax-highlighted code, and split/unified diffs.
+7. Discuss whole blocks or immutable source ranges through addressable threads
+   shared by the browser, CLI, and Coding Agents.
 
 Large-diff virtualization, GitHub PR import, notebook/image viewers, and
 elaborate keyboard navigation are later capabilities.
@@ -60,11 +62,13 @@ Use a repository-local convention such as:
   assets/
 ```
 
-`review.yaml` is the machine-readable source of truth. It should capture a
+`review.yaml` is the machine-readable source of truth for the review narrative. It should capture a
 schema version, immutable source refs, change summary, ordered review steps,
 priority rationale, narrative blocks, and review status. Mermaid source belongs
 in the artifact directory rather than existing only as rendered output. Legacy
 v1 annotations and decisions remain readable; v2 deliberately omits them.
+Mutable discussion lives in a separately versioned `comments.yaml` beside the
+review so agent-authored narrative and reviewer conversation remain independent.
 
 Patchflow must avoid reviewing its own generated review artifact by default.
 

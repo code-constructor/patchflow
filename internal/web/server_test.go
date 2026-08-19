@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -9,18 +10,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	patchreview "github.com/traqx-ai/patchflow/internal/review"
 )
 
 // TestAppRunsRepositoryToChapterFlow exercises repository selection through chapter rendering.
 func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	repository := featureRepository(t)
-	app, err := NewApp(repository, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	app := newTestApp(t, repository)
 
 	home := perform(app, http.MethodGet, "/", "")
-	if home.Code != http.StatusOK || !strings.Contains(home.Body.String(), "Create the first review") {
+	if home.Code != http.StatusOK || !strings.Contains(home.Body.String(), "Open repositories") || !strings.Contains(home.Body.String(), repository) {
 		t.Fatalf("unexpected home response: %d %s", home.Code, home.Body.String())
 	}
 
@@ -30,20 +30,31 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 	location := created.Header().Get("Location")
 	reviewPath := strings.Split(location, "?")[0]
-	if !strings.HasPrefix(reviewPath, "/reviews/") {
+	if !strings.HasPrefix(reviewPath, "/repositories/") || !strings.Contains(reviewPath, "/reviews/") {
 		t.Fatalf("unexpected redirect %q", location)
 	}
 
 	overview := perform(app, http.MethodGet, reviewPath, "")
-	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") {
+	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/steps/domain\"") || !strings.Contains(overview.Body.String(), "href=\"https://github.com/traqx-ai/patchflow\"") || !strings.Contains(overview.Body.String(), "aria-label=\"Open repository on GitHub\"") {
 		t.Fatalf("unexpected overview: %d %s", overview.Code, overview.Body.String())
 	}
 
 	chapter := perform(app, http.MethodGet, reviewPath+"/steps/domain", "")
-	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\"", "id=\"domain-intro\"", "type=\"button\"", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-intro\"", "aria-label=\"Copy path for block domain-intro\"", "data-controller=\"chapter-navigation\"", "Review question", "Does the domain behavior", "Chapter takeaway", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-takeaway\""} {
+	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\"", "id=\"domain-intro\"", "id=\"review-block-domain-intro\"", "class=\"review-block-frame\"", "type=\"button\"", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-intro\"", "aria-label=\"Copy path for block domain-intro\"", "data-controller=\"chapter-navigation\"", "Review question", "Does the domain behavior", "Chapter takeaway", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-takeaway\"", "href=\"/\" class=\"repository-overview-link\"", "href=\"https://github.com/traqx-ai/patchflow\""} {
 		if !strings.Contains(chapter.Body.String(), expected) {
 			t.Errorf("chapter missing %q", expected)
 		}
+	}
+	for _, expected := range []string{"aria-label=\"Comment on block domain-intro\"", "title=\"Add comment\"", "popover=\"manual\"", "data-comment-thread-target=\"composerTemplate\"", "name=\"author\" value=\"Patchflow Test\"", "action=\"" + reviewPath + "/blocks/domain-intro/threads\""} {
+		if !strings.Contains(chapter.Body.String(), expected) {
+			t.Errorf("chapter comment action missing %q", expected)
+		}
+	}
+	if !strings.Contains(chapter.Body.String(), "data-thread-list-for=\"domain-intro\"") {
+		t.Error("chapter is missing the empty inline discussion target")
+	}
+	if !strings.Contains(chapter.Body.String(), "data-turbo-stream") || !strings.Contains(chapter.Body.String(), "data-turbo-submits-with=\"Saving…\"") {
+		t.Error("comment forms must request inline streams and expose their loading state")
 	}
 	if strings.Contains(chapter.Body.String(), "href=\""+reviewPath+"/blocks/domain-intro\"") {
 		t.Error("block copy control must not navigate")
@@ -59,7 +70,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 
 	asset := perform(app, http.MethodGet, "/assets/application.js", "")
-	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") || !strings.Contains(asset.Body.String(), "diagram-viewer") || !strings.Contains(asset.Body.String(), "block-reference") || !strings.Contains(asset.Body.String(), "chapter-navigation") {
+	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") || !strings.Contains(asset.Body.String(), "diagram-viewer") || !strings.Contains(asset.Body.String(), "block-reference") || !strings.Contains(asset.Body.String(), "chapter-navigation") || !strings.Contains(asset.Body.String(), "comment-thread") {
 		t.Fatalf("embedded asset unavailable: %d", asset.Code)
 	}
 	blockController := perform(app, http.MethodGet, "/assets/controllers/block_reference_controller.js", "")
@@ -70,6 +81,14 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	if chapterController.Code != http.StatusOK || !strings.Contains(chapterController.Body.String(), "scrollIntoView") || strings.Contains(chapterController.Body.String(), "history.pushState") || strings.Contains(chapterController.Body.String(), "history.replaceState") {
 		t.Fatalf("chapter navigation does not scroll in place: %d", chapterController.Code)
 	}
+	commentController := perform(app, http.MethodGet, "/assets/controllers/comment_thread_controller.js", "")
+	if commentController.Code != http.StatusOK || !strings.Contains(commentController.Body.String(), "pointermove") || !strings.Contains(commentController.Body.String(), "showPopover") || !strings.Contains(commentController.Body.String(), "cloneNode") || !strings.Contains(commentController.Body.String(), "anchor.start === line") || !strings.Contains(commentController.Body.String(), "openThreadPopover") || !strings.Contains(commentController.Body.String(), "enhanceDiff") {
+		t.Fatalf("comment thread controller unavailable: %d", commentController.Code)
+	}
+	documentController := perform(app, http.MethodGet, "/assets/controllers/review_document_controller.js", "")
+	if documentController.Code != http.StatusOK || !strings.Contains(documentController.Body.String(), "link.dataset.turboFrame = \"_top\"") {
+		t.Fatalf("review prose links are not protected from block-frame navigation: %d", documentController.Code)
+	}
 	diagramController := perform(app, http.MethodGet, "/assets/controllers/diagram_viewer_controller.js", "")
 	if diagramController.Code != http.StatusOK || !strings.Contains(diagramController.Body.String(), "showModal") {
 		t.Fatalf("diagram viewer controller unavailable: %d", diagramController.Code)
@@ -79,7 +98,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		t.Fatalf("diff layout is not URL-backed: %d", diffController.Code)
 	}
 	styles := perform(app, http.MethodGet, "/assets/styles/application.css", "")
-	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", ".chapter-rail { position: sticky", ".callout, .review-question, .chapter-takeaway { width: 100%"} {
+	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", "--color-comment-marker:", ".chapter-rail { position: sticky", ".callout, .review-question, .chapter-takeaway { width: 100%", ".discussion-panel:has(.thread-list:empty)", ".github-link", "comment-submit-spin"} {
 		if !strings.Contains(styles.Body.String(), expected) {
 			t.Errorf("theme stylesheet missing %q", expected)
 		}
@@ -95,13 +114,88 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 }
 
+// TestAppPersistsAddressableBlockCodeAndReplyComments exercises the browser discussion flow.
+func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
+	repository := featureRepository(t)
+	app := newTestApp(t, repository)
+	created := perform(app, http.MethodPost, "/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
+	reviewPath := strings.Split(created.Header().Get("Location"), "?")[0]
+	reviewID := reviewIDFromPath(reviewPath)
+
+	opening := performTurbo(app, http.MethodPost, reviewPath+"/blocks/domain-intro/threads", url.Values{
+		"target_type": {"block"}, "author": {"Patchflow Test"}, "body": {"Please explain this boundary."}, "draft_id": {"comment-draft-test"},
+	}.Encode())
+	if opening.Code != http.StatusOK || !strings.Contains(opening.Header().Get("Content-Type"), "text/vnd.turbo-stream.html") || !strings.Contains(opening.Body.String(), "action=\"append\"") || !strings.Contains(opening.Body.String(), "target=\"comment-draft-test\"") {
+		t.Fatalf("block comment failed: %d %s", opening.Code, opening.Body.String())
+	}
+	store, _ := patchreview.NewStore(repository, nil)
+	stored, _ := store.Find(reviewID)
+	discussion, err := store.ReadDiscussion(stored)
+	if err != nil || len(discussion.Threads) != 1 {
+		t.Fatalf("comment was not persisted: %v %#v", err, discussion)
+	}
+	thread := discussion.Threads[0]
+	threadPage := perform(app, http.MethodGet, reviewPath+"/threads/"+thread.ID, "")
+	for _, expected := range []string{"Please explain this boundary.", "comment-thread is-focused", reviewPath + "/comments/" + thread.Comments[0].ID, "data-controller=\"comment-thread\"", "name=\"author\" value=\"Patchflow Test\"", "data-comment-thread-id=\"" + thread.ID + "\"", "Edit comment"} {
+		if !strings.Contains(threadPage.Body.String(), expected) {
+			t.Errorf("thread page missing %q", expected)
+		}
+	}
+
+	edited := performTurbo(app, http.MethodPost, reviewPath+"/comments/"+thread.Comments[0].ID+"/edit", url.Values{"body": {"Please explain the ownership boundary."}}.Encode())
+	if edited.Code != http.StatusOK || !strings.Contains(edited.Header().Get("Content-Type"), "text/vnd.turbo-stream.html") || !strings.Contains(edited.Body.String(), "data-comment-thread-id") || !strings.Contains(edited.Body.String(), "Please explain the ownership boundary.") {
+		t.Fatalf("comment edit failed: %d %s", edited.Code, edited.Body.String())
+	}
+	discussion, _ = store.ReadDiscussion(stored)
+	if discussion.Threads[0].Comments[0].Body != "Please explain the ownership boundary." || discussion.Threads[0].Comments[0].UpdatedAt == "" {
+		t.Fatalf("comment edit was not persisted: %#v", discussion.Threads[0].Comments[0])
+	}
+	editedPage := perform(app, http.MethodGet, reviewPath+"/comments/"+thread.Comments[0].ID, "")
+	if editedPage.Code != http.StatusOK || !strings.Contains(editedPage.Body.String(), "Please explain the ownership boundary.") || !strings.Contains(editedPage.Body.String(), "comment-edited") {
+		t.Fatalf("edited comment cannot be reopened: %d %s", editedPage.Code, editedPage.Body.String())
+	}
+
+	reply := performTurbo(app, http.MethodPost, reviewPath+"/threads/"+thread.ID+"/replies", url.Values{"author": {"Reviewer 2"}, "body": {"The service owns the persistence boundary."}}.Encode())
+	if reply.Code != http.StatusOK || !strings.Contains(reply.Body.String(), "The service owns the persistence boundary.") || !strings.Contains(reply.Body.String(), "action=\"update\"") {
+		t.Fatalf("reply failed: %d %s", reply.Code, reply.Body.String())
+	}
+	resolved := performTurbo(app, http.MethodPost, reviewPath+"/threads/"+thread.ID+"/resolution", url.Values{"resolved": {"true"}}.Encode())
+	if resolved.Code != http.StatusOK || !strings.Contains(resolved.Body.String(), "Resolved thread") || !strings.Contains(resolved.Body.String(), ">Reopen</button>") {
+		t.Fatalf("resolve failed: %d %s", resolved.Code, resolved.Body.String())
+	}
+	discussion, _ = store.ReadDiscussion(stored)
+	if !discussion.Threads[0].Resolved {
+		t.Fatal("thread resolution was not persisted")
+	}
+
+	diffBlock := stored.Review.Steps[0].Blocks[1]
+	lineThread := perform(app, http.MethodPost, reviewPath+"/blocks/"+diffBlock.ID+"/threads", url.Values{
+		"target_type": {"code"}, "path": {diffBlock.Path}, "side": {"target"}, "start_line": {"1"}, "end_line": {"2"},
+		"author": {"Alex"}, "body": {"These two lines belong together."},
+	}.Encode())
+	if lineThread.Code != http.StatusSeeOther {
+		t.Fatalf("line comment failed: %d %s", lineThread.Code, lineThread.Body.String())
+	}
+	discussion, _ = store.ReadDiscussion(stored)
+	anchor := discussion.Threads[1].Target
+	if anchor.CommitSHA != stored.Review.Source.TargetSHA || anchor.StartLine != 1 || anchor.EndLine != 2 {
+		t.Fatalf("line anchor was not tied to target source: %#v", anchor)
+	}
+
+	crossOrigin := httptest.NewRequest(http.MethodPost, reviewPath+"/blocks/domain-intro/threads", strings.NewReader(url.Values{"author": {"Mallory"}, "body": {"cross-site"}}.Encode()))
+	crossOrigin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	crossOrigin.Header.Set("Origin", "https://attacker.example")
+	crossOriginResponse := httptest.NewRecorder()
+	app.ServeHTTP(crossOriginResponse, crossOrigin)
+	if crossOriginResponse.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin mutation returned %d", crossOriginResponse.Code)
+	}
+}
+
 // TestRepositoryPickerListsGitRepositoriesAndRejectsEscapes covers picker discovery and containment.
 func TestRepositoryPickerListsGitRepositoriesAndRejectsEscapes(t *testing.T) {
 	repository := featureRepository(t)
-	app, err := NewApp(repository, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	app := newTestApp(t, repository)
 
 	response := perform(app, http.MethodGet, "/repository-picker?path="+url.QueryEscape(app.browseRoot), "")
 	if response.Code != http.StatusOK {
@@ -119,6 +213,92 @@ func TestRepositoryPickerListsGitRepositoriesAndRejectsEscapes(t *testing.T) {
 	}
 }
 
+// TestAppKeepsRepositoryTabsIndependent verifies URL-scoped selection across projects.
+func TestAppKeepsRepositoryTabsIndependent(t *testing.T) {
+	firstRepository := featureRepository(t)
+	secondRepository := featureRepository(t)
+	settingsPath := filepath.Join(t.TempDir(), "patchflow", "config.json")
+	app, err := newApp("", settingsPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstOpen := perform(app, http.MethodPost, "/repository", url.Values{"repository_path": {firstRepository}}.Encode())
+	secondOpen := perform(app, http.MethodPost, "/repository", url.Values{"repository_path": {secondRepository}}.Encode())
+	firstPath := strings.Split(firstOpen.Header().Get("Location"), "?")[0]
+	secondPath := strings.Split(secondOpen.Header().Get("Location"), "?")[0]
+	firstBase := strings.TrimSuffix(firstPath, "/reviews/new")
+	secondBase := strings.TrimSuffix(secondPath, "/reviews/new")
+	if len(firstOpen.Result().Cookies()) != 0 || len(secondOpen.Result().Cookies()) != 0 {
+		t.Fatal("repository selection must not depend on new browser cookies")
+	}
+	if firstBase == secondBase {
+		t.Fatalf("repositories share URL identity: %q %q", firstBase, secondBase)
+	}
+	if strings.Contains(firstBase, firstRepository) || strings.Contains(secondBase, secondRepository) {
+		t.Fatal("scoped URLs must not expose absolute repository paths")
+	}
+
+	firstHome := perform(app, http.MethodGet, firstBase, "")
+	secondHome := perform(app, http.MethodGet, secondBase, "")
+	if firstHome.Code != http.StatusOK || !strings.Contains(firstHome.Body.String(), firstRepository) {
+		t.Fatalf("first repository tab lost its context: %d %s", firstHome.Code, firstHome.Body.String())
+	}
+	if secondHome.Code != http.StatusOK || !strings.Contains(secondHome.Body.String(), secondRepository) {
+		t.Fatalf("second repository tab lost its context: %d %s", secondHome.Code, secondHome.Body.String())
+	}
+	restarted, err := newApp("", settingsPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dashboard := perform(restarted, http.MethodGet, "/", "")
+	for _, expected := range []string{firstRepository, secondRepository, firstBase, secondBase, "Open repositories"} {
+		if !strings.Contains(dashboard.Body.String(), expected) {
+			t.Errorf("repository dashboard is missing %q", expected)
+		}
+	}
+
+	firstReview := perform(restarted, http.MethodPost, firstBase+"/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
+	secondReview := perform(restarted, http.MethodPost, secondBase+"/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
+	if !strings.HasPrefix(firstReview.Header().Get("Location"), firstBase+"/reviews/") || !strings.HasPrefix(secondReview.Header().Get("Location"), secondBase+"/reviews/") {
+		t.Fatalf("review redirects escaped their repository scopes: %q %q", firstReview.Header().Get("Location"), secondReview.Header().Get("Location"))
+	}
+	closed := perform(restarted, http.MethodPost, firstBase+"/repository/close", "")
+	if closed.Code != http.StatusSeeOther {
+		t.Fatalf("closing repository returned %d", closed.Code)
+	}
+	afterClose := perform(restarted, http.MethodGet, "/", "")
+	if strings.Contains(afterClose.Body.String(), firstRepository) || !strings.Contains(afterClose.Body.String(), secondRepository) {
+		t.Fatalf("closing one repository changed the wrong dashboard entries: %s", afterClose.Body.String())
+	}
+}
+
+// TestAppMigratesLegacyRepositoryCookie persists selections from earlier browser sessions.
+func TestAppMigratesLegacyRepositoryCookie(t *testing.T) {
+	repository := featureRepository(t)
+	settingsPath := filepath.Join(t.TempDir(), "patchflow", "config.json")
+	app, err := newApp("", settingsPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{Name: repositoryCookie, Value: base64.RawURLEncoding.EncodeToString([]byte(repository))})
+	response := httptest.NewRecorder()
+	app.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), repository) {
+		t.Fatalf("legacy cookie was not shown during migration: %d %s", response.Code, response.Body.String())
+	}
+
+	restarted, err := newApp("", settingsPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted := perform(restarted, http.MethodGet, "/", "")
+	if !strings.Contains(persisted.Body.String(), repository) {
+		t.Fatal("legacy cookie selection did not survive without the browser cookie")
+	}
+}
+
 // TestBrowseDirectoriesSkipsSymlinksOutsideRoot hides children that resolve beyond the browse root.
 func TestBrowseDirectoriesSkipsSymlinksOutsideRoot(t *testing.T) {
 	root := t.TempDir()
@@ -132,6 +312,27 @@ func TestBrowseDirectoriesSkipsSymlinksOutsideRoot(t *testing.T) {
 	}
 	if len(view.Entries) != 0 {
 		t.Fatalf("expected outside symlink to be hidden, got %#v", view.Entries)
+	}
+}
+
+// TestBrowseDirectoriesListsGitWorktrees accepts the .git file used by linked worktrees.
+func TestBrowseDirectoriesListsGitWorktrees(t *testing.T) {
+	root := t.TempDir()
+	worktreeGroup := filepath.Join(root, "worktrees", "project")
+	worktree := filepath.Join(worktreeGroup, "feature-branch")
+	if err := os.MkdirAll(worktree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: /tmp/example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := browseDirectories(root, worktreeGroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Entries) != 1 || view.Entries[0].Path != worktree || !view.Entries[0].IsRepository {
+		t.Fatalf("linked worktree is not selectable: %#v", view.Entries)
 	}
 }
 
@@ -160,7 +361,7 @@ func TestAppRendersLegacyV1AsChapterBlocks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(reviewDirectory, "overview.md"), []byte("# Legacy review\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	app, _ := NewApp(repository, nil)
+	app := newTestApp(t, repository)
 	response := perform(app, http.MethodGet, "/reviews/20260818-153000-a1b2c3d4/steps/domain-model", "")
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "diff-viewer") {
 		t.Fatalf("legacy chapter failed: %d %s", response.Code, response.Body.String())
@@ -220,6 +421,35 @@ func perform(handler http.Handler, method, path, body string) *httptest.Response
 	return response
 }
 
+// performTurbo sends one in-memory request that asks for a targeted Turbo Stream response.
+func performTurbo(handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "text/vnd.turbo-stream.html, text/html")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+// reviewIDFromPath extracts the final review resource segment from a scoped URL.
+func reviewIDFromPath(reviewPath string) string {
+	parts := strings.Split(strings.Trim(reviewPath, "/"), "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[len(parts)-1]
+}
+
+// newTestApp creates an application with settings isolated from the developer's home.
+func newTestApp(t *testing.T, defaultRepository string) *App {
+	t.Helper()
+	app, err := newApp(defaultRepository, filepath.Join(t.TempDir(), "patchflow", "config.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return app
+}
+
 // featureRepository creates a small two-commit repository used by HTTP flows.
 func featureRepository(t *testing.T) string {
 	t.Helper()
@@ -227,6 +457,7 @@ func featureRepository(t *testing.T) string {
 	git(t, directory, "init", "-b", "main")
 	git(t, directory, "config", "user.email", "patchflow@example.test")
 	git(t, directory, "config", "user.name", "Patchflow Test")
+	git(t, directory, "remote", "add", "origin", "git@github.com:traqx-ai/patchflow.git")
 	write(t, directory, "app/models/account.rb", "class Account\nend\n")
 	git(t, directory, "add", ".")
 	git(t, directory, "commit", "-m", "Initial application")
