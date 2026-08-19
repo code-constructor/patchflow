@@ -205,7 +205,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		}
 	}
 	styles := perform(app, http.MethodGet, "/assets/styles/application.css", "")
-	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", "--color-comment-marker:", ".chapter-rail { position: sticky", ".chapter-step-nav", ".callout, .review-question, .chapter-takeaway { width: 100%", ".discussion-panel:has(.thread-list:empty)", ".github-link", ".site-back", ".review-tabs", ".file-browser", "comment-submit-spin"} {
+	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", "--color-comment-marker:", "--block-header-sticky-offset:", ".chapter-rail { position: sticky", ".chapter-step-nav", ".code-card__header { position: sticky", "top: var(--block-header-sticky-offset)", ".callout, .review-question, .chapter-takeaway { width: 100%", ".discussion-panel:has(.thread-list:empty)", ".github-link", ".site-back", ".review-tabs", ".file-browser", "comment-submit-spin"} {
 		if !strings.Contains(styles.Body.String(), expected) {
 			t.Errorf("theme stylesheet missing %q", expected)
 		}
