@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1
+
+FROM rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.9.1
+
+ARG QWEN_TTS_VERSION=0.1.1
+
+RUN apt-get update && apt-get install --yes --no-install-recommends sox && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir "numpy==1.26.4" "qwen-tts==${QWEN_TTS_VERSION}"
+
+WORKDIR /app
+COPY speech/design_voice.py /app/design_voice.py
+
+ENV HF_HOME=/models/huggingface \
+    PATCHFLOW_TTS_VOICE_DIR=/models/voice \
+    PATCHFLOW_TTS_DEVICE=cuda:0 \
+    PATCHFLOW_TTS_DTYPE=bfloat16 \
+    TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
+
+ENTRYPOINT ["python3", "/app/design_voice.py"]

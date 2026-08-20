@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -36,6 +38,7 @@ const defaultDiffContext = 3
 const diffContextBatch = 100
 const maxDiffContext = 100_003
 const maxSpeechTextCharacters = 12_000
+const speechStreamErrorFrame = ^uint32(0)
 
 type repositoryScopeKey struct{}
 
@@ -746,7 +749,7 @@ func (a *App) reviewImage(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(content)
 }
 
-// synthesizeSpeech validates one narrative request and proxies locally generated audio.
+// synthesizeSpeech validates one narrative request and flushes framed PCM as each phrase is generated.
 func (a *App) synthesizeSpeech(w http.ResponseWriter, r *http.Request) {
 	if !validMutationOrigin(r) {
 		http.Error(w, "Cross-origin speech request rejected", http.StatusForbidden)
@@ -772,17 +775,67 @@ func (a *App) synthesizeSpeech(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Speech text must contain between 1 and 12000 characters", http.StatusUnprocessableEntity)
 		return
 	}
-	audio, err := a.speech.Synthesize(r.Context(), request.Text)
-	if err != nil {
-		a.logger.Error("synthesize speech", "error", err)
-		http.Error(w, "The local speech provider could not synthesize this block", http.StatusBadGateway)
+	flusher, canFlush := w.(http.Flusher)
+	if !canFlush {
+		http.Error(w, "Streaming speech is unavailable for this connection", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", audio.ContentType)
-	w.Header().Set("Content-Length", strconv.Itoa(len(audio.Data)))
-	w.Header().Set("Cache-Control", "private, no-store")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(audio.Data)
+	started := false
+	var sampleRate, channels, bitsPerSample int
+	err := a.speech.Stream(r.Context(), request.Text, func(chunk patchspeech.Chunk) error {
+		if chunk.SampleRate <= 0 || chunk.Channels <= 0 || chunk.BitsPerSample != 16 || len(chunk.Data) == 0 {
+			return errors.New("local speech provider returned an unsupported audio chunk")
+		}
+		if !started {
+			sampleRate = chunk.SampleRate
+			channels = chunk.Channels
+			bitsPerSample = chunk.BitsPerSample
+			w.Header().Set("Content-Type", "application/vnd.patchflow.pcm-stream")
+			w.Header().Set("Cache-Control", "private, no-store")
+			w.Header().Set("X-Patchflow-Sample-Rate", strconv.Itoa(sampleRate))
+			w.Header().Set("X-Patchflow-Channels", strconv.Itoa(channels))
+			w.Header().Set("X-Patchflow-Bits-Per-Sample", strconv.Itoa(bitsPerSample))
+			w.WriteHeader(http.StatusOK)
+			started = true
+		} else if chunk.SampleRate != sampleRate || chunk.Channels != channels || chunk.BitsPerSample != bitsPerSample {
+			return errors.New("local speech provider changed audio format during playback")
+		}
+		if err := writeSpeechFrame(w, uint32(len(chunk.Data)), chunk.Data); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	})
+	if err != nil {
+		a.logger.Error("synthesize speech", "error", err)
+		if !started {
+			http.Error(w, "The local speech provider could not synthesize this block", http.StatusBadGateway)
+			return
+		}
+		_ = writeSpeechFrame(w, speechStreamErrorFrame, nil)
+		flusher.Flush()
+		return
+	}
+	if !started {
+		http.Error(w, "The local speech provider returned no audio", http.StatusBadGateway)
+		return
+	}
+	_ = writeSpeechFrame(w, 0, nil)
+	flusher.Flush()
+}
+
+// writeSpeechFrame writes one little-endian length prefix followed by its PCM payload.
+func writeSpeechFrame(w http.ResponseWriter, length uint32, payload []byte) error {
+	var prefix [4]byte
+	binary.LittleEndian.PutUint32(prefix[:], length)
+	if _, err := w.Write(prefix[:]); err != nil {
+		return err
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	_, err := w.Write(payload)
+	return err
 }
 
 // allowedReviewImageType restricts inline assets to inert browser raster formats.

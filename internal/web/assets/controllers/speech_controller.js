@@ -1,16 +1,19 @@
 import { Controller } from "@hotwired/stimulus"
 
+const MAX_FRAME_BYTES = 64 * 1024 * 1024
+const STREAM_ERROR_FRAME = 0xffffffff
+
 export default class extends Controller {
   static targets = ["content", "loadingIcon", "pauseIcon", "playIcon", "status", "stopButton", "toggle"]
 
-  /** Prepares one independent audio player and listens for another block taking over. */
+  /** Prepares one independent streaming player and listens for another block taking over. */
   connect() {
     this.handleExternalStart = this.handleExternalStart.bind(this)
     window.addEventListener("patchflow:speech-start", this.handleExternalStart)
     this.runID = 0
     this.active = false
     this.paused = false
-    this.audioURL = null
+    this.sources = new Set()
     this.updateState("idle", "Read this block aloud")
   }
 
@@ -30,10 +33,10 @@ export default class extends Controller {
       this.resume()
       return
     }
-    if (this.audio && !this.audio.paused) this.pause()
+    if (this.audioContext && this.state === "playing") this.pause()
   }
 
-  /** Requests locally synthesized audio and begins playback when it arrives. */
+  /** Opens Web Audio during the user gesture and requests locally streamed PCM. */
   async start() {
     const text = this.readableText()
     if (!text) {
@@ -41,18 +44,28 @@ export default class extends Controller {
       return
     }
 
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextClass) {
+      this.fail("This browser cannot play streamed audio")
+      return
+    }
+
     window.dispatchEvent(new CustomEvent("patchflow:speech-start", { detail: { source: this } }))
-    this.releaseAudio()
+    this.releasePlayback()
     const runID = ++this.runID
     this.active = true
     this.paused = false
+    this.streamComplete = false
+    this.nextStartTime = 0
     this.abortController = new AbortController()
+    this.audioContext = new AudioContextClass()
     this.updateState("loading", "Generating local speech…")
 
     try {
+      await this.audioContext.resume()
       const response = await fetch("/speech", {
         method: "POST",
-        headers: { "Accept": "audio/wav", "Content-Type": "application/json" },
+        headers: { "Accept": "application/vnd.patchflow.pcm-stream", "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
         signal: this.abortController.signal
       })
@@ -60,45 +73,112 @@ export default class extends Controller {
         const message = (await response.text()).trim()
         throw new Error(message || "Local speech synthesis failed")
       }
-      const audio = new Audio()
-      const audioURL = URL.createObjectURL(await response.blob())
-      if (runID !== this.runID) {
-        URL.revokeObjectURL(audioURL)
-        return
-      }
-      this.audio = audio
-      this.audioURL = audioURL
-      audio.preload = "auto"
-      audio.src = audioURL
-      audio.onended = () => {
-        if (runID === this.runID) this.finish()
-      }
-      audio.onerror = () => {
-        if (runID === this.runID) this.fail("The generated audio could not be played")
-      }
-      await audio.play()
+      await this.consumeStream(response, runID)
       if (runID !== this.runID) return
       this.abortController = null
-      this.updateState("playing", "Pause reading")
+      this.streamComplete = true
+      if (this.sources.size === 0) this.finish()
     } catch (error) {
       if (runID !== this.runID || error.name === "AbortError") return
       this.fail(this.errorMessage(error))
     }
   }
 
-  /** Pauses the current audio without discarding the generated block narration. */
-  pause() {
-    if (!this.audio) return
-    this.audio.pause()
+  /** Reads framed PCM from Fetch and schedules each complete frame immediately. */
+  async consumeStream(response, runID) {
+    const format = this.responseFormat(response)
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error("This browser cannot read streaming audio")
+    let pending = new Uint8Array(0)
+    let terminalFrame = false
+
+    while (!terminalFrame) {
+      const { value, done } = await reader.read()
+      if (done) break
+      pending = this.concatenate(pending, value)
+      while (pending.byteLength >= 4) {
+        const frameLength = new DataView(pending.buffer, pending.byteOffset, 4).getUint32(0, true)
+        if (frameLength === 0) {
+          pending = pending.slice(4)
+          terminalFrame = true
+          break
+        }
+        if (frameLength === STREAM_ERROR_FRAME) throw new Error("Local speech synthesis stopped before the block was complete")
+        if (frameLength > MAX_FRAME_BYTES) throw new Error("Local speech synthesis returned an oversized audio frame")
+        if (pending.byteLength < frameLength + 4) break
+        this.schedulePCM(pending.slice(4, frameLength + 4), format, runID)
+        pending = pending.slice(frameLength + 4)
+      }
+    }
+
+    if (!terminalFrame || pending.byteLength !== 0) throw new Error("Local speech synthesis returned an incomplete audio stream")
+    await reader.cancel()
+  }
+
+  /** Parses and validates the PCM format advertised by the same-origin Go endpoint. */
+  responseFormat(response) {
+    const contentType = response.headers.get("Content-Type") || ""
+    const sampleRate = Number.parseInt(response.headers.get("X-Patchflow-Sample-Rate") || "", 10)
+    const channels = Number.parseInt(response.headers.get("X-Patchflow-Channels") || "", 10)
+    const bitsPerSample = Number.parseInt(response.headers.get("X-Patchflow-Bits-Per-Sample") || "", 10)
+    if (!contentType.startsWith("application/vnd.patchflow.pcm-stream") || !Number.isInteger(sampleRate) || sampleRate < 8000 || sampleRate > 96000 || channels !== 1 || bitsPerSample !== 16) {
+      throw new Error("Local speech synthesis returned an unsupported audio format")
+    }
+    return { sampleRate, channels, bitsPerSample }
+  }
+
+  /** Appends a network fragment while retaining an incomplete frame prefix or payload. */
+  concatenate(left, right) {
+    if (!left.byteLength) return right
+    const combined = new Uint8Array(left.byteLength + right.byteLength)
+    combined.set(left)
+    combined.set(right, left.byteLength)
+    return combined
+  }
+
+  /** Converts little-endian signed PCM to an AudioBuffer and queues gap-free playback. */
+  schedulePCM(bytes, format, runID) {
+    if (runID !== this.runID || !this.audioContext || bytes.byteLength === 0 || bytes.byteLength % 2 !== 0) return
+    const frameCount = bytes.byteLength / 2 / format.channels
+    const audioBuffer = this.audioContext.createBuffer(format.channels, frameCount, format.sampleRate)
+    const samples = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    for (let channel = 0; channel < format.channels; channel += 1) {
+      const output = audioBuffer.getChannelData(channel)
+      for (let frame = 0; frame < frameCount; frame += 1) {
+        output[frame] = samples.getInt16((frame * format.channels + channel) * 2, true) / 32768
+      }
+    }
+
+    const source = this.audioContext.createBufferSource()
+    source.buffer = audioBuffer
+    source.connect(this.audioContext.destination)
+    const startAt = Math.max(this.nextStartTime, this.audioContext.currentTime + 0.04)
+    this.nextStartTime = startAt + audioBuffer.duration
+    this.sources.add(source)
+    source.onended = () => this.sourceEnded(source, runID)
+    source.start(startAt)
+    if (this.state === "loading") this.updateState("playing", "Pause reading")
+  }
+
+  /** Removes a completed source and closes the player after the terminal stream frame. */
+  sourceEnded(source, runID) {
+    this.sources.delete(source)
+    if (runID === this.runID && this.streamComplete && this.sources.size === 0) this.finish()
+  }
+
+  /** Pauses the shared block timeline without discarding queued audio. */
+  async pause() {
+    if (!this.audioContext) return
+    await this.audioContext.suspend()
     this.paused = true
     this.updateState("paused", "Resume reading")
   }
 
-  /** Resumes already generated audio from its current position. */
+  /** Resumes already buffered and newly arriving audio from its current position. */
   async resume() {
-    if (!this.audio) return
+    if (!this.audioContext) return
     try {
-      await this.audio.play()
+      await this.audioContext.resume()
       this.paused = false
       this.updateState("playing", "Pause reading")
     } catch (error) {
@@ -113,7 +193,7 @@ export default class extends Controller {
     this.paused = false
     if (this.abortController) this.abortController.abort()
     this.abortController = null
-    this.releaseAudio()
+    this.releasePlayback()
     this.updateState("idle", "Read this block aloud")
   }
 
@@ -127,22 +207,22 @@ export default class extends Controller {
     return this.contentTarget.innerText.replace(/\s+/g, " ").trim().slice(0, 12000)
   }
 
-  /** Releases the current media element and its temporary object URL. */
-  releaseAudio() {
-    if (this.audio) {
-      this.audio.onended = null
-      this.audio.onerror = null
-      this.audio.pause()
-      this.audio.removeAttribute("src")
-      this.audio.load()
+  /** Stops scheduled sources and closes the current Web Audio context. */
+  releasePlayback() {
+    for (const source of this.sources || []) {
+      source.onended = null
+      try { source.stop() } catch (_) { /* The source may already have ended. */ }
     }
-    this.audio = null
-    if (this.audioURL) URL.revokeObjectURL(this.audioURL)
-    this.audioURL = null
+    this.sources = new Set()
+    if (this.audioContext) this.audioContext.close().catch(() => {})
+    this.audioContext = null
+    this.nextStartTime = 0
+    this.streamComplete = false
   }
 
   /** Synchronizes loading, playback, error, and accessibility feedback. */
   updateState(state, message) {
+    this.state = state
     const loading = state === "loading"
     const playing = state === "playing"
     const paused = state === "paused"
@@ -166,11 +246,11 @@ export default class extends Controller {
     return String(error?.message || "Local speech synthesis failed").replace(/\s+/g, " ").trim().slice(0, 240)
   }
 
-  /** Finishes successful playback and releases the generated audio. */
+  /** Finishes successful playback and releases the streamed timeline. */
   finish() {
     this.active = false
     this.paused = false
-    this.releaseAudio()
+    this.releasePlayback()
     this.updateState("idle", "Read this block aloud")
   }
 
@@ -181,7 +261,7 @@ export default class extends Controller {
     this.paused = false
     if (this.abortController) this.abortController.abort()
     this.abortController = null
-    this.releaseAudio()
+    this.releasePlayback()
     this.updateState("error", message)
   }
 }

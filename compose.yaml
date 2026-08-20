@@ -14,7 +14,6 @@ services:
     environment:
       PATCHFLOW_CONFIG_PATH: ${PATCHFLOW_DOCKER_CONFIG_PATH:-/workspace/.patchflow/config.json}
       PATCHFLOW_TTS_URL: http://speech:5000
-      PATCHFLOW_TTS_VOICE: ${PATCHFLOW_TTS_VOICE:-en_US-lessac-high}
     command: ["patchflow", "serve", "--config", "${PATCHFLOW_DOCKER_CONFIG_PATH:-/workspace/.patchflow/config.json}", "--addr", "0.0.0.0:3000"]
     volumes:
       - ${HOME}/Projects:/workspace
@@ -46,17 +45,48 @@ services:
       context: .
       dockerfile: Dockerfile.speech
       args:
-        PIPER_VERSION: ${PATCHFLOW_PIPER_VERSION:-1.6.0}
-        PIPER_VOICE: ${PATCHFLOW_TTS_VOICE:-en_US-lessac-high}
+        CHATTERBOX_REVISION: ${PATCHFLOW_CHATTERBOX_REVISION:-ce5a900dbdbc776eeb3d00c1c1607143c7604a5b}
     image: patchflow-speech:dev
     restart: unless-stopped
-    command: ["-m", "${PATCHFLOW_TTS_VOICE:-en_US-lessac-high}"]
+    environment:
+      PATCHFLOW_TTS_DEVICE: cpu
+      PATCHFLOW_TTS_THREADS: ${PATCHFLOW_TTS_THREADS:-16}
+      PATCHFLOW_TTS_CHUNK_TOKENS: ${PATCHFLOW_TTS_CHUNK_TOKENS:-24}
+    volumes:
+      - speech-models:/models
+    depends_on:
+      voice-design:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/info', timeout=2)"]
       interval: 5s
       timeout: 5s
-      retries: 30
-      start_period: 20s
+      retries: 60
+      start_period: 60s
+
+  voice-design:
+    build:
+      context: .
+      dockerfile: Dockerfile.voice-design
+      args:
+        QWEN_TTS_VERSION: ${PATCHFLOW_QWEN_TTS_VERSION:-0.1.1}
+    image: patchflow-voice-design:dev
+    restart: "no"
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+    ipc: host
+    shm_size: 8gb
+    environment:
+      PATCHFLOW_TTS_VOICE_INSTRUCTION: ${PATCHFLOW_TTS_VOICE_INSTRUCTION:-Create an original mature American female artificial-intelligence voice for a futuristic technical interface. Calm, highly intelligent, precise, subtly warm, confident, and composed. Use clear diction, a measured conversational pace, a low-to-mid pitch, restrained emotion, faint synthetic polish, and a trace of dry wit. The voice must be distinct and must not imitate or resemble any real person or existing fictional character.}
+    volumes:
+      - speech-models:/models
+
+volumes:
+  speech-models:
+    name: ${PATCHFLOW_SPEECH_MODELS_VOLUME:-patchflow-speech-models}
 
 networks:
   dev-proxy:

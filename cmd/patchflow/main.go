@@ -265,8 +265,8 @@ func serve(arguments []string) int {
 	repositoryPath := flags.String("repository", "", "repository selected when the server starts")
 	settingsPath := flags.String("config", "", "path to the Patchflow user configuration")
 	address := flags.String("addr", "127.0.0.1:3000", "listen address")
-	ttsURL := flags.String("tts-url", os.Getenv("PATCHFLOW_TTS_URL"), "local Piper HTTP server URL")
-	ttsVoice := flags.String("tts-voice", os.Getenv("PATCHFLOW_TTS_VOICE"), "optional Piper voice name")
+	ttsURL := flags.String("tts-url", os.Getenv("PATCHFLOW_TTS_URL"), "local speech provider HTTP URL")
+	ttsVoice := flags.String("tts-voice", os.Getenv("PATCHFLOW_TTS_VOICE"), "optional speech provider voice name")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
@@ -280,7 +280,7 @@ func serve(arguments []string) int {
 	var synthesizer patchspeech.Synthesizer
 	var err error
 	if *ttsURL != "" {
-		synthesizer, err = patchspeech.NewPiperClient(*ttsURL, *ttsVoice, nil)
+		synthesizer, err = patchspeech.NewHTTPClient(*ttsURL, *ttsVoice, nil)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1

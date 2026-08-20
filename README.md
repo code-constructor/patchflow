@@ -108,7 +108,8 @@ control exposes a compact loading state.
 Narrative prose, callouts, review questions, takeaways, and image captions have
 a read-aloud control with loading, pause, resume, stop, and inline failure
 states. Patchflow sends the bounded text through its same-origin Go endpoint to
-an explicitly configured local Piper process; it does not depend on browser or
+an explicitly configured local neural speech process; framed PCM travels to the
+browser as soon as each model chunk exists. It does not depend on browser or
 operating-system voices. See the
 [text-to-speech design note](docs/text-to-speech.md) for configuration and the
 local-first privacy boundary. Diffs initially keep Git's compact context.
@@ -199,17 +200,14 @@ docker compose up --build
 
 Patchflow is then available at <http://patchflow.localhost>. No host port is
 claimed by the application container; Traefik discovers it from Compose labels.
-Compose also starts a private Piper speech service. Its model is downloaded
-while the speech image is built, so the first build takes longer than later
-cached builds. English review prose uses `en_US-lessac-high` by default; choose
-a German model for a German-language journey with:
-
-```sh
-PATCHFLOW_TTS_VOICE=de_DE-thorsten-high docker compose up --build
-```
-
-Piper is reachable only from the Compose network. The browser talks to
-Patchflow, never directly to the synthesis service.
+Compose also creates an original, calm Sci-Fi assistant voice with Qwen3-TTS
+VoiceDesign and serves it through Chatterbox Turbo. Models and the generated
+reference live in the `patchflow-speech-models` Docker volume. The first start
+downloads the models and is therefore substantially slower; later starts reuse
+the local volume. Voice design uses the host's AMD ROCm devices once, while
+streaming synthesis runs on the CPU and keeps the GPU free. The speech service
+is reachable only from the Compose network. The browser talks to Patchflow,
+never directly to the synthesis service.
 
 The container also exports the server's config path to CLI subprocesses. A
 Coding Agent can therefore create and register a review without opening the

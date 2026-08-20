@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"net/http"
@@ -208,7 +209,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		t.Fatalf("plan disclosure controller unavailable: %d", planDisclosureController.Code)
 	}
 	speechController := perform(app, http.MethodGet, "/assets/controllers/speech_controller.js", "")
-	for _, expected := range []string{"fetch(\"/speech\"", "new Audio()", "URL.createObjectURL", "AbortController", "patchflow:speech-start", "Generating local speech"} {
+	for _, expected := range []string{"fetch(\"/speech\"", "AudioContext", "response.body?.getReader", "schedulePCM", "AbortController", "patchflow:speech-start", "Generating local speech"} {
 		if speechController.Code != http.StatusOK || !strings.Contains(speechController.Body.String(), expected) {
 			t.Errorf("speech controller missing %q", expected)
 		}
@@ -257,8 +258,14 @@ func TestSpeechEndpointReturnsOnlyConfiguredLocalAudio(t *testing.T) {
 	repository := featureRepository(t)
 	app := newTestApp(t, repository)
 	response := perform(app, http.MethodPost, "/speech", `{"text":"Explain this boundary."}`)
-	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "audio/wav" || response.Body.String() != "RIFFxxxxWAVEtest" || response.Header().Get("Cache-Control") != "private, no-store" {
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/vnd.patchflow.pcm-stream" || response.Header().Get("Cache-Control") != "private, no-store" {
 		t.Fatalf("unexpected speech response: %d %q %q", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+	if response.Header().Get("X-Patchflow-Sample-Rate") != "22050" || response.Header().Get("X-Patchflow-Channels") != "1" || response.Header().Get("X-Patchflow-Bits-Per-Sample") != "16" {
+		t.Fatalf("unexpected speech format headers: %#v", response.Header())
+	}
+	if !bytes.Equal(response.Body.Bytes(), []byte{4, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0}) {
+		t.Fatalf("unexpected framed PCM response: %v", response.Body.Bytes())
 	}
 	if !strings.Contains(response.Header().Get("Content-Security-Policy"), "media-src 'self' blob:") {
 		t.Fatalf("speech response does not allow same-origin blob audio: %q", response.Header().Get("Content-Security-Policy"))
@@ -745,12 +752,12 @@ func newTestApp(t *testing.T, defaultRepository string) *App {
 	return app
 }
 
-// stubSpeechSynthesizer returns deterministic WAV-like bytes for browser contract tests.
+// stubSpeechSynthesizer returns deterministic PCM bytes for browser contract tests.
 type stubSpeechSynthesizer struct{}
 
-// Synthesize returns a small deterministic audio document without external processes.
-func (stubSpeechSynthesizer) Synthesize(_ context.Context, _ string) (*patchspeech.Audio, error) {
-	return &patchspeech.Audio{ContentType: "audio/wav", Data: []byte("RIFFxxxxWAVEtest")}, nil
+// Stream emits a small deterministic audio chunk without external processes.
+func (stubSpeechSynthesizer) Stream(_ context.Context, _ string, emit func(patchspeech.Chunk) error) error {
+	return emit(patchspeech.Chunk{SampleRate: 22_050, Channels: 1, BitsPerSample: 16, Data: []byte{1, 0, 2, 0}})
 }
 
 // featureRepository creates a small two-commit repository used by HTTP flows.
