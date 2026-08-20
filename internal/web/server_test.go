@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/traqx-ai/patchflow/internal/artifact"
 	"github.com/traqx-ai/patchflow/internal/gitrepo"
 	patchreview "github.com/traqx-ai/patchflow/internal/review"
+	patchspeech "github.com/traqx-ai/patchflow/internal/speech"
 	yaml "go.yaml.in/yaml/v3"
 )
 
@@ -206,9 +208,14 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		t.Fatalf("plan disclosure controller unavailable: %d", planDisclosureController.Code)
 	}
 	speechController := perform(app, http.MethodGet, "/assets/controllers/speech_controller.js", "")
-	for _, expected := range []string{"SpeechSynthesisUtterance", "speechSynthesis.pause", "speechSynthesis.resume", "Intl.Segmenter", "patchflow:speech-start", "localService"} {
+	for _, expected := range []string{"fetch(\"/speech\"", "new Audio()", "URL.createObjectURL", "AbortController", "patchflow:speech-start", "Generating local speech"} {
 		if speechController.Code != http.StatusOK || !strings.Contains(speechController.Body.String(), expected) {
 			t.Errorf("speech controller missing %q", expected)
+		}
+	}
+	for _, browserNativeAPI := range []string{"speechSynthesis", "SpeechSynthesisUtterance"} {
+		if strings.Contains(speechController.Body.String(), browserNativeAPI) {
+			t.Errorf("speech controller still uses browser-native API %q", browserNativeAPI)
 		}
 	}
 	imageController := perform(app, http.MethodGet, "/assets/controllers/image_viewer_controller.js", "")
@@ -242,6 +249,44 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	newReview := perform(app, http.MethodGet, basePath+"/reviews/new", "")
 	if newReview.Code != http.StatusOK || !strings.Contains(newReview.Body.String(), "data-navigation-fallback-value=\""+basePath+"\"") || strings.Contains(newReview.Body.String(), "aria-label=\"Create new review\"") {
 		t.Fatalf("new review navigation is not contextual: %d %s", newReview.Code, newReview.Body.String())
+	}
+}
+
+// TestSpeechEndpointReturnsOnlyConfiguredLocalAudio verifies validation, origin checks, and media output.
+func TestSpeechEndpointReturnsOnlyConfiguredLocalAudio(t *testing.T) {
+	repository := featureRepository(t)
+	app := newTestApp(t, repository)
+	response := perform(app, http.MethodPost, "/speech", `{"text":"Explain this boundary."}`)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "audio/wav" || response.Body.String() != "RIFFxxxxWAVEtest" || response.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("unexpected speech response: %d %q %q", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+	if !strings.Contains(response.Header().Get("Content-Security-Policy"), "media-src 'self' blob:") {
+		t.Fatalf("speech response does not allow same-origin blob audio: %q", response.Header().Get("Content-Security-Policy"))
+	}
+	invalid := perform(app, http.MethodPost, "/speech", `{"text":""}`)
+	if invalid.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("empty speech returned %d", invalid.Code)
+	}
+	crossOriginRequest := httptest.NewRequest(http.MethodPost, "/speech", strings.NewReader(`{"text":"Do not synthesize me."}`))
+	crossOriginRequest.Header.Set("Origin", "https://attacker.example")
+	crossOriginResponse := httptest.NewRecorder()
+	app.ServeHTTP(crossOriginResponse, crossOriginRequest)
+	if crossOriginResponse.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin speech returned %d", crossOriginResponse.Code)
+	}
+
+	withoutSpeech, err := newApp(repository, filepath.Join(t.TempDir(), "patchflow", "config.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unavailable := perform(withoutSpeech, http.MethodPost, "/speech", `{"text":"No provider."}`)
+	if unavailable.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured speech returned %d", unavailable.Code)
+	}
+	created := perform(withoutSpeech, http.MethodPost, "/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
+	overview := perform(withoutSpeech, http.MethodGet, strings.Split(created.Header().Get("Location"), "?")[0], "")
+	if strings.Contains(overview.Body.String(), "data-action=\"speech#toggle\"") {
+		t.Fatal("unconfigured application rendered a non-functional speech control")
 	}
 }
 
@@ -696,7 +741,16 @@ func newTestApp(t *testing.T, defaultRepository string) *App {
 	if err != nil {
 		t.Fatal(err)
 	}
+	app.speech = stubSpeechSynthesizer{}
 	return app
+}
+
+// stubSpeechSynthesizer returns deterministic WAV-like bytes for browser contract tests.
+type stubSpeechSynthesizer struct{}
+
+// Synthesize returns a small deterministic audio document without external processes.
+func (stubSpeechSynthesizer) Synthesize(_ context.Context, _ string) (*patchspeech.Audio, error) {
+	return &patchspeech.Audio{ContentType: "audio/wav", Data: []byte("RIFFxxxxWAVEtest")}, nil
 }
 
 // featureRepository creates a small two-commit repository used by HTTP flows.

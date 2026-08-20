@@ -18,11 +18,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/traqx-ai/patchflow/internal/artifact"
 	"github.com/traqx-ai/patchflow/internal/gitrepo"
 	patchreview "github.com/traqx-ai/patchflow/internal/review"
 	patchsettings "github.com/traqx-ai/patchflow/internal/settings"
+	patchspeech "github.com/traqx-ai/patchflow/internal/speech"
 )
 
 //go:embed templates/*.html assets
@@ -33,6 +35,7 @@ const maxReviewImageBytes int64 = 20 << 20
 const defaultDiffContext = 3
 const diffContextBatch = 100
 const maxDiffContext = 100_003
+const maxSpeechTextCharacters = 12_000
 
 type repositoryScopeKey struct{}
 
@@ -49,6 +52,7 @@ type App struct {
 	defaultRepository string
 	browseRoot        string
 	settings          *patchsettings.Store
+	speech            patchspeech.Synthesizer
 	logger            *slog.Logger
 }
 
@@ -78,6 +82,7 @@ type Page struct {
 	Files            *FilesView
 	Discussions      *DiscussionsView
 	PickerRoot       string
+	SpeechAvailable  bool
 }
 
 // GitHubLinkView describes the external GitHub destination shown on review pages.
@@ -258,6 +263,16 @@ func NewAppWithSettings(defaultRepository, settingsPath string, logger *slog.Log
 	return newApp(defaultRepository, settingsPath, logger)
 }
 
+// NewAppWithSettingsAndSpeech assembles the application with persistent settings and local speech synthesis.
+func NewAppWithSettingsAndSpeech(defaultRepository, settingsPath string, synthesizer patchspeech.Synthesizer, logger *slog.Logger) (*App, error) {
+	app, err := newApp(defaultRepository, settingsPath, logger)
+	if err != nil {
+		return nil, err
+	}
+	app.speech = synthesizer
+	return app, nil
+}
+
 // newApp assembles the application with an injectable settings path for isolated tests.
 func newApp(defaultRepository, settingsPath string, logger *slog.Logger) (*App, error) {
 	if logger == nil {
@@ -321,6 +336,10 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/up" || r.URL.Path == "/healthz" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/speech" {
+		a.synthesizeSpeech(w, r)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/repositories/") {
@@ -661,6 +680,7 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 			blockContext = diffContext
 		}
 		view := buildBlock(repository, store, stored, files, block, blockContext)
+		view.Readable = view.Readable && a.speech != nil
 		if block.Type == "image" {
 			view.ImageURL = basePath + "/reviews/" + stored.Review.ID + "/images/" + block.ID
 		}
@@ -724,6 +744,45 @@ func (a *App) reviewImage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
+}
+
+// synthesizeSpeech validates one narrative request and proxies locally generated audio.
+func (a *App) synthesizeSpeech(w http.ResponseWriter, r *http.Request) {
+	if !validMutationOrigin(r) {
+		http.Error(w, "Cross-origin speech request rejected", http.StatusForbidden)
+		return
+	}
+	if a.speech == nil {
+		http.Error(w, "Local speech synthesis is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	defer r.Body.Close()
+	var request struct {
+		Text string `json:"text"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "Speech request must contain valid JSON text", http.StatusBadRequest)
+		return
+	}
+	request.Text = strings.TrimSpace(request.Text)
+	if request.Text == "" || !utf8.ValidString(request.Text) || utf8.RuneCountInString(request.Text) > maxSpeechTextCharacters {
+		http.Error(w, "Speech text must contain between 1 and 12000 characters", http.StatusUnprocessableEntity)
+		return
+	}
+	audio, err := a.speech.Synthesize(r.Context(), request.Text)
+	if err != nil {
+		a.logger.Error("synthesize speech", "error", err)
+		http.Error(w, "The local speech provider could not synthesize this block", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", audio.ContentType)
+	w.Header().Set("Content-Length", strconv.Itoa(len(audio.Data)))
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(audio.Data)
 }
 
 // allowedReviewImageType restricts inline assets to inert browser raster formats.
@@ -1470,6 +1529,7 @@ func (a *App) requireRepository(w http.ResponseWriter, r *http.Request) (*gitrep
 // render writes a complete HTML page and converts template failures to HTTP errors.
 func (a *App) render(w http.ResponseWriter, name string, page Page, status int) {
 	page = pageWithNavigation(name, page)
+	page.SpeechAvailable = a.speech != nil
 	var buffer bytes.Buffer
 	if err := a.templates[name].ExecuteTemplate(&buffer, "layout", page); err != nil {
 		a.logger.Error("render page", "page", name, "error", err)
@@ -1533,7 +1593,7 @@ func (a *App) renderTurboStream(w http.ResponseWriter, templateName string, valu
 
 // securityHeaders sets the browser policy for embedded local assets and scripts.
 func (a *App) securityHeaders(w http.ResponseWriter) {
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 }

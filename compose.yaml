@@ -13,6 +13,8 @@ services:
     restart: unless-stopped
     environment:
       PATCHFLOW_CONFIG_PATH: ${PATCHFLOW_DOCKER_CONFIG_PATH:-/workspace/.patchflow/config.json}
+      PATCHFLOW_TTS_URL: http://speech:5000
+      PATCHFLOW_TTS_VOICE: ${PATCHFLOW_TTS_VOICE:-en_US-lessac-high}
     command: ["patchflow", "serve", "--config", "${PATCHFLOW_DOCKER_CONFIG_PATH:-/workspace/.patchflow/config.json}", "--addr", "0.0.0.0:3000"]
     volumes:
       - ${HOME}/Projects:/workspace
@@ -28,6 +30,9 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+    depends_on:
+      speech:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME:-patchflow}.rule=Host(`${DEV_DOMAIN:-patchflow.localhost}`)"
@@ -35,6 +40,23 @@ services:
     networks:
       - default
       - dev-proxy
+
+  speech:
+    build:
+      context: .
+      dockerfile: Dockerfile.speech
+      args:
+        PIPER_VERSION: ${PATCHFLOW_PIPER_VERSION:-1.6.0}
+        PIPER_VOICE: ${PATCHFLOW_TTS_VOICE:-en_US-lessac-high}
+    image: patchflow-speech:dev
+    restart: unless-stopped
+    command: ["-m", "${PATCHFLOW_TTS_VOICE:-en_US-lessac-high}"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/info', timeout=2)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
 
 networks:
   dev-proxy:

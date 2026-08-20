@@ -1,26 +1,23 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["content", "playIcon", "pauseIcon", "status", "stopButton", "toggle"]
+  static targets = ["content", "loadingIcon", "pauseIcon", "playIcon", "status", "stopButton", "toggle"]
 
-  /** Prepares one independent narrative reader and listens for another block taking over. */
+  /** Prepares one independent audio player and listens for another block taking over. */
   connect() {
     this.handleExternalStart = this.handleExternalStart.bind(this)
     window.addEventListener("patchflow:speech-start", this.handleExternalStart)
     this.runID = 0
     this.active = false
     this.paused = false
+    this.audioURL = null
     this.updateState("idle", "Read this block aloud")
-    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
-      this.toggleTarget.disabled = true
-      this.updateState("unavailable", "Text-to-speech is unavailable in this browser")
-    }
   }
 
-  /** Cancels speech owned by a block before Turbo removes its controller. */
+  /** Cancels pending synthesis and playback before Turbo removes this controller. */
   disconnect() {
     window.removeEventListener("patchflow:speech-start", this.handleExternalStart)
-    if (this.active) this.stop()
+    this.stop()
   }
 
   /** Starts, pauses, or resumes this block according to its current state. */
@@ -33,50 +30,90 @@ export default class extends Controller {
       this.resume()
       return
     }
-    this.pause()
+    if (this.audio && !this.audio.paused) this.pause()
   }
 
-  /** Starts a fresh sentence queue and gives this block exclusive speech ownership. */
-  start() {
+  /** Requests locally synthesized audio and begins playback when it arrives. */
+  async start() {
     const text = this.readableText()
     if (!text) {
-      this.updateState("idle", "This block has no readable text")
+      this.fail("This block has no readable text")
       return
     }
 
     window.dispatchEvent(new CustomEvent("patchflow:speech-start", { detail: { source: this } }))
-    window.speechSynthesis.cancel()
-    this.runID += 1
-    this.activeRunID = this.runID
-    this.chunks = this.chunkText(text)
-    this.chunkIndex = 0
+    this.releaseAudio()
+    const runID = ++this.runID
     this.active = true
     this.paused = false
-    this.updateState("playing", "Pause reading")
-    this.speakNext(this.activeRunID)
+    this.abortController = new AbortController()
+    this.updateState("loading", "Generating local speech…")
+
+    try {
+      const response = await fetch("/speech", {
+        method: "POST",
+        headers: { "Accept": "audio/wav", "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+        signal: this.abortController.signal
+      })
+      if (!response.ok) {
+        const message = (await response.text()).trim()
+        throw new Error(message || "Local speech synthesis failed")
+      }
+      const audio = new Audio()
+      const audioURL = URL.createObjectURL(await response.blob())
+      if (runID !== this.runID) {
+        URL.revokeObjectURL(audioURL)
+        return
+      }
+      this.audio = audio
+      this.audioURL = audioURL
+      audio.preload = "auto"
+      audio.src = audioURL
+      audio.onended = () => {
+        if (runID === this.runID) this.finish()
+      }
+      audio.onerror = () => {
+        if (runID === this.runID) this.fail("The generated audio could not be played")
+      }
+      await audio.play()
+      if (runID !== this.runID) return
+      this.abortController = null
+      this.updateState("playing", "Pause reading")
+    } catch (error) {
+      if (runID !== this.runID || error.name === "AbortError") return
+      this.fail(this.errorMessage(error))
+    }
   }
 
-  /** Pauses the current browser utterance without losing the remaining sentences. */
+  /** Pauses the current audio without discarding the generated block narration. */
   pause() {
-    window.speechSynthesis.pause()
+    if (!this.audio) return
+    this.audio.pause()
     this.paused = true
     this.updateState("paused", "Resume reading")
   }
 
-  /** Resumes a paused browser utterance. */
-  resume() {
-    window.speechSynthesis.resume()
-    this.paused = false
-    this.updateState("playing", "Pause reading")
+  /** Resumes already generated audio from its current position. */
+  async resume() {
+    if (!this.audio) return
+    try {
+      await this.audio.play()
+      this.paused = false
+      this.updateState("playing", "Pause reading")
+    } catch (error) {
+      this.fail(this.errorMessage(error))
+    }
   }
 
-  /** Stops this block, discards its queue, and restores the idle controls. */
+  /** Stops synthesis or playback and restores the idle controls. */
   stop() {
     this.runID += 1
     this.active = false
     this.paused = false
-    this.chunks = []
-    window.speechSynthesis.cancel()
+    if (this.abortController) this.abortController.abort()
+    this.abortController = null
+    this.releaseAudio()
     this.updateState("idle", "Read this block aloud")
   }
 
@@ -85,97 +122,66 @@ export default class extends Controller {
     if (event.detail.source !== this && this.active) this.stop()
   }
 
-  /** Speaks the next bounded sentence group and completes when the queue is empty. */
-  speakNext(runID) {
-    if (!this.active || runID !== this.runID) return
-    if (this.chunkIndex >= this.chunks.length) {
-      this.finish("Finished reading")
-      return
-    }
-
-    const utterance = this.buildUtterance(this.chunks[this.chunkIndex])
-    utterance.onend = () => {
-      if (runID !== this.runID) return
-      this.chunkIndex += 1
-      this.speakNext(runID)
-    }
-    utterance.onerror = (event) => {
-      if (runID !== this.runID || event.error === "canceled" || event.error === "interrupted") return
-      this.finish("Could not read this block with the available voice")
-    }
-    window.speechSynthesis.speak(utterance)
-  }
-
-  /** Builds one browser utterance with a language-matched local voice when available. */
-  buildUtterance(text) {
-    const utterance = new SpeechSynthesisUtterance(text)
-    const language = document.documentElement.lang || navigator.language || "en"
-    const voice = this.selectVoice(language)
-    utterance.lang = language
-    utterance.rate = 0.95
-    utterance.pitch = 1
-    if (voice) utterance.voice = voice
-    return utterance
-  }
-
-  /** Chooses a local language match before falling back to any matching browser voice. */
-  selectVoice(language) {
-    const voices = window.speechSynthesis.getVoices()
-    const normalized = language.toLowerCase()
-    const prefix = normalized.split("-")[0]
-    return voices.find((voice) => voice.localService && voice.lang.toLowerCase() === normalized) ||
-      voices.find((voice) => voice.localService && voice.lang.toLowerCase().startsWith(prefix)) ||
-      voices.find((voice) => voice.lang.toLowerCase() === normalized) ||
-      voices.find((voice) => voice.lang.toLowerCase().startsWith(prefix))
-  }
-
-  /** Extracts rendered prose while excluding controls and discussion content outside the target. */
+  /** Extracts rendered prose while excluding controls and adjacent discussion content. */
   readableText() {
     return this.contentTarget.innerText.replace(/\s+/g, " ").trim().slice(0, 12000)
   }
 
-  /** Splits long prose at sentence and word boundaries for reliable Chromium playback. */
-  chunkText(text) {
-    const language = document.documentElement.lang || navigator.language || "en"
-    const segments = "Segmenter" in Intl
-      ? Array.from(new Intl.Segmenter(language, { granularity: "sentence" }).segment(text), (entry) => entry.segment.trim())
-      : text.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [text]
-    const chunks = []
-    let current = ""
-    for (const segment of segments.filter(Boolean)) {
-      const words = segment.split(/\s+/)
-      for (const word of words) {
-        if (current && `${current} ${word}`.length > 240) {
-          chunks.push(current)
-          current = word
-        } else {
-          current = current ? `${current} ${word}` : word
-        }
-      }
+  /** Releases the current media element and its temporary object URL. */
+  releaseAudio() {
+    if (this.audio) {
+      this.audio.onended = null
+      this.audio.onerror = null
+      this.audio.pause()
+      this.audio.removeAttribute("src")
+      this.audio.load()
     }
-    if (current) chunks.push(current)
-    return chunks
+    this.audio = null
+    if (this.audioURL) URL.revokeObjectURL(this.audioURL)
+    this.audioURL = null
   }
 
-  /** Synchronizes icons, accessible labels, live feedback, and the optional stop action. */
+  /** Synchronizes loading, playback, error, and accessibility feedback. */
   updateState(state, message) {
+    const loading = state === "loading"
     const playing = state === "playing"
-    const active = playing || state === "paused"
-    this.playIconTarget.hidden = playing
+    const paused = state === "paused"
+    const active = loading || playing || paused
+    this.playIconTarget.hidden = loading || playing
     this.pauseIconTarget.hidden = !playing
+    this.loadingIconTarget.hidden = !loading
     this.stopButtonTarget.hidden = !active
     this.toggleTarget.classList.toggle("is-active", active)
-    this.toggleTarget.setAttribute("aria-pressed", String(active))
+    this.toggleTarget.classList.toggle("is-loading", loading)
+    this.toggleTarget.classList.toggle("is-error", state === "error")
+    this.toggleTarget.setAttribute("aria-pressed", String(playing || paused))
     this.toggleTarget.setAttribute("aria-label", message)
     this.toggleTarget.title = message
     this.statusTarget.textContent = message
+    this.statusTarget.hidden = state !== "error"
   }
 
-  /** Ends this queue without canceling unrelated speech and announces the result. */
-  finish(message) {
+  /** Returns a concise browser or server failure without exposing an HTML response. */
+  errorMessage(error) {
+    return String(error?.message || "Local speech synthesis failed").replace(/\s+/g, " ").trim().slice(0, 240)
+  }
+
+  /** Finishes successful playback and releases the generated audio. */
+  finish() {
     this.active = false
     this.paused = false
-    this.chunks = []
-    this.updateState("idle", message)
+    this.releaseAudio()
+    this.updateState("idle", "Read this block aloud")
+  }
+
+  /** Ends failed playback while keeping an actionable inline error visible. */
+  fail(message) {
+    this.runID += 1
+    this.active = false
+    this.paused = false
+    if (this.abortController) this.abortController.abort()
+    this.abortController = null
+    this.releaseAudio()
+    this.updateState("error", message)
   }
 }
