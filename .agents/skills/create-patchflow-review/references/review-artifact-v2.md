@@ -30,7 +30,7 @@ steps:
     title: <short chapter title>
     priority: critical | high | medium | low
     rationale: <why this chapter belongs at this position>
-    review_question: <optional decision or behavior the reviewer should verify>
+    review_question: <optional verification focus; never an unresolved development decision>
     attention: # optional, unique values
       - design | behavior | data | security | reliability | performance | ux | operations | verification | documentation | mechanical
     files:
@@ -93,7 +93,8 @@ Apply these invariants:
 - Include at least one changed file, one review step, and one block per step.
   Use each changed path once in `change.files`; reference only changed paths
   from step file lists and diff blocks; cover every changed path in at least one
-  step.
+  step. Step-file coverage is inventory metadata: a changed path does not need
+  a visible `code` or `diff` block when it does not advance the review journey.
 - Code blocks may reference unchanged files when necessary for context.
 - Use normalized relative paths with `/` separators. Reject absolute paths,
   `..`, backslashes, and repository paths below `.patchflow`. Keep diagram paths
@@ -102,10 +103,17 @@ Apply these invariants:
   use SVG for untrusted review assets.
 - Keep line ranges ordered. Limit code excerpts to 500 lines.
 - Use no unknown fields. Set new reviews to `draft`.
-- Use `review_question` and `attention` when they sharpen a chapter's purpose.
+- Use `review_question` only for review verification, never to defer an unresolved
+  product, architecture, or implementation decision into Patchflow. Prefer a
+  declarative rationale for decisions already made. Use `attention` when it
+  sharpens a chapter's purpose.
   Use a final `takeaway` block when a specific mental model should close the
   chapter. Collapse only evidence whose initial expansion would spend attention
   without improving the reviewer's first-pass understanding.
+- When visible evidence omits changed paths, end with a compact
+  scope-and-coverage step. Assign every omitted path to that step's `files`
+  metadata and name it in the narrative with a concrete reason. Do not add an
+  empty coverage step when visible evidence already covers every changed path.
 
 The Patchflow application's `bin/patchflow validate --format json` command is
 authoritative when available. It checks both the artifact contract and the
