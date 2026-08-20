@@ -219,6 +219,11 @@ func (r *Repository) ChangedFiles(baseSHA, targetSHA string) ([]artifact.Changed
 
 // Diff returns a literal-path patch for one changed file, bounded by the display limit.
 func (r *Repository) Diff(baseSHA, targetSHA, path, previousPath string) (string, error) {
+	return r.DiffWithContext(baseSHA, targetSHA, path, previousPath, 3)
+}
+
+// DiffWithContext returns a literal-path patch with the requested surrounding lines.
+func (r *Repository) DiffWithContext(baseSHA, targetSHA, path, previousPath string, contextLines int) (string, error) {
 	if err := validateSHA(baseSHA); err != nil {
 		return "", err
 	}
@@ -235,7 +240,10 @@ func (r *Repository) Diff(baseSHA, targetSHA, path, previousPath string) (string
 		}
 		paths = append(paths, ":(literal)"+previousPath)
 	}
-	args := []string{"diff", "--no-ext-diff", "--no-color", "--unified=3", "--find-renames", baseSHA, targetSHA, "--"}
+	if contextLines < 0 || contextLines > 100_003 {
+		return "", &Error{Message: "Diff context must contain between 0 and 100003 lines"}
+	}
+	args := []string{"diff", "--no-ext-diff", "--no-color", fmt.Sprintf("--unified=%d", contextLines), "--find-renames", baseSHA, targetSHA, "--"}
 	output, err := r.git(append(args, paths...)...)
 	if err != nil {
 		return "", err

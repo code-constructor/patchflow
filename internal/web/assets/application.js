@@ -13,6 +13,7 @@ import ViewedController from "/assets/controllers/viewed_controller.js"
 import ImageViewerController from "/assets/controllers/image_viewer_controller.js"
 import NavigationController from "/assets/controllers/navigation_controller.js"
 import PlanFileDisclosureController from "/assets/controllers/plan_file_disclosure_controller.js"
+import SpeechController from "/assets/controllers/speech_controller.js"
 
 const application = Application.start()
 application.debug = false
@@ -29,3 +30,4 @@ application.register("viewed", ViewedController)
 application.register("image-viewer", ImageViewerController)
 application.register("navigation", NavigationController)
 application.register("plan-file-disclosure", PlanFileDisclosureController)
+application.register("speech", SpeechController)

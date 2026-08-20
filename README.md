@@ -105,6 +105,14 @@ discussion through targeted Turbo Streams. Open popovers, the surrounding
 chapter, and the reader's scroll position remain in place, while the submitting
 control exposes a compact loading state.
 
+Narrative prose, callouts, review questions, takeaways, and image captions have
+a read-aloud control with pause and stop actions. The zero-configuration
+provider uses the browser's available speech voices; see the
+[text-to-speech design note](docs/text-to-speech.md) for its local-first boundary
+and future natural-voice providers. Diffs initially keep Git's compact context.
+When more surrounding source exists, controls above and below the patch load it
+in repeatable 100-line batches inside the current Turbo Frame.
+
 Repository review lists separate current evidence from collapsed stale
 history. `Draft` remains the lifecycle status of an unfinished review; `Stale`
 means its target ref no longer resolves to the recorded target commit. The

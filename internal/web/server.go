@@ -30,6 +30,9 @@ var embedded embed.FS
 
 const repositoryCookie = "patchflow_repository"
 const maxReviewImageBytes int64 = 20 << 20
+const defaultDiffContext = 3
+const diffContextBatch = 100
+const maxDiffContext = 100_003
 
 type repositoryScopeKey struct{}
 
@@ -155,6 +158,9 @@ type BlockView struct {
 	ThreadAnchors   string
 	ReviewerName    string
 	Commentable     bool
+	Readable        bool
+	DiffContextPath string
+	CanExpandDiff   bool
 	Focused         bool
 	Collapsed       bool
 	Viewed          *ViewedControlView
@@ -612,11 +618,11 @@ func (a *App) chapter(w http.ResponseWriter, r *http.Request) {
 		redirect(w, r, requestRepositoryBasePath(r, repository)+"/reviews/"+stored.Review.ID, "alert", "Review step not found.")
 		return
 	}
-	a.renderChapter(w, repository, store, stored, requestRepositoryBasePath(r, repository), stepIndex, "", "", "", r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
+	a.renderChapter(w, repository, store, stored, requestRepositoryBasePath(r, repository), stepIndex, "", "", "", "", defaultDiffContext, r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
 }
 
 // renderChapter resolves one step and optionally highlights an addressed block.
-func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, basePath string, stepIndex int, focusedBlockID, focusedThreadID, focusedCommentID, notice, alert string) {
+func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, basePath string, stepIndex int, focusedBlockID, focusedThreadID, focusedCommentID, expandedBlockID string, diffContext int, notice, alert string) {
 	step := stored.Review.Steps[stepIndex]
 	chapter := ChapterView{BasePath: basePath, ReviewID: stored.Review.ID, Number: stepIndex + 1, Total: len(stored.Review.Steps), Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, ReviewQuestion: step.ReviewQuestion, Attention: step.Attention, DesignGate: step.Priority == "critical" && step.ReviewQuestion != ""}
 	if stepIndex > 0 {
@@ -650,11 +656,18 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 		viewed = map[string]bool{}
 	}
 	for _, block := range blocks {
-		view := buildBlock(repository, store, stored, files, block)
+		blockContext := defaultDiffContext
+		if block.ID == expandedBlockID {
+			blockContext = diffContext
+		}
+		view := buildBlock(repository, store, stored, files, block, blockContext)
 		if block.Type == "image" {
 			view.ImageURL = basePath + "/reviews/" + stored.Review.ID + "/images/" + block.ID
 		}
 		view.ReferencePath = basePath + "/reviews/" + stored.Review.ID + "/blocks/" + block.ID
+		if view.CanExpandDiff {
+			view.DiffContextPath = view.ReferencePath + "?context=" + strconv.Itoa(nextDiffContext(blockContext))
+		}
 		view.ReferenceLabel = "block " + block.ID
 		view.Label = blockLabel(block)
 		view.Focused = block.ID == focusedBlockID
@@ -838,7 +851,7 @@ func (a *App) block(w http.ResponseWriter, r *http.Request) {
 			if block.ID != parts[3] {
 				continue
 			}
-			a.renderChapter(w, repository, store, stored, requestRepositoryBasePath(r, repository), stepIndex, block.ID, "", "", r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
+			a.renderChapter(w, repository, store, stored, requestRepositoryBasePath(r, repository), stepIndex, block.ID, "", "", block.ID, requestedDiffContext(r), r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
 			return
 		}
 	}
@@ -897,7 +910,7 @@ func (a *App) renderDiscussionReference(w http.ResponseWriter, r *http.Request, 
 		http.NotFound(w, r)
 		return
 	}
-	a.renderChapter(w, repository, store, blockLocation.Stored, requestRepositoryBasePath(r, repository), blockLocation.StepIndex, blockID, focusedThreadID, focusedCommentID, r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
+	a.renderChapter(w, repository, store, blockLocation.Stored, requestRepositoryBasePath(r, repository), blockLocation.StepIndex, blockID, focusedThreadID, focusedCommentID, "", defaultDiffContext, r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
 }
 
 // createThread persists a block or selected source-range comment from the chapter UI.
@@ -1073,17 +1086,23 @@ func (a *App) updateThreadResolution(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildBlock joins a declarative artifact block with evidence from its recorded commits.
-func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, files map[string]artifact.ChangedFile, block artifact.Block) BlockView {
-	view := BlockView{ID: block.ID, Type: block.Type, Body: block.Body, Kind: block.Kind, Path: block.Path, View: defaultString(block.View, "split"), SourceSide: block.Source, StartLine: block.StartLine, EndLine: block.EndLine, Collapsed: block.Collapsed, Alt: block.Alt, Caption: block.Caption}
+func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, files map[string]artifact.ChangedFile, block artifact.Block, diffContext int) BlockView {
+	readable := block.Type == "prose" || block.Type == "callout" || block.Type == "question" || block.Type == "takeaway" || (block.Type == "image" && block.Caption != "")
+	view := BlockView{ID: block.ID, Type: block.Type, Body: block.Body, Kind: block.Kind, Path: block.Path, View: defaultString(block.View, "split"), SourceSide: block.Source, StartLine: block.StartLine, EndLine: block.EndLine, Collapsed: block.Collapsed, Alt: block.Alt, Caption: block.Caption, Readable: readable}
 	switch block.Type {
 	case "diff":
 		file := files[block.Path]
-		source, err := repository.Diff(stored.Review.Source.BaseSHA, stored.Review.Source.TargetSHA, block.Path, file.PreviousPath)
+		source, err := repository.DiffWithContext(stored.Review.Source.BaseSHA, stored.Review.Source.TargetSHA, block.Path, file.PreviousPath, diffContext)
 		if err != nil {
 			view.Error = err.Error()
 		} else {
 			view.Source = source
 			view.Highlights = highlightDiffJSON(block.Path, source)
+			nextContext := nextDiffContext(diffContext)
+			if nextContext > diffContext {
+				expanded, expandErr := repository.DiffWithContext(stored.Review.Source.BaseSHA, stored.Review.Source.TargetSHA, block.Path, file.PreviousPath, nextContext)
+				view.CanExpandDiff = expandErr == nil && expanded != source
+			}
 		}
 		if block.Focus != nil {
 			end := block.Focus.EndLine
@@ -1122,6 +1141,21 @@ func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored
 		}
 	}
 	return view
+}
+
+// requestedDiffContext normalizes untrusted query input to fixed 100-line batches.
+func requestedDiffContext(r *http.Request) int {
+	requested, err := strconv.Atoi(r.URL.Query().Get("context"))
+	if err != nil || requested <= defaultDiffContext {
+		return defaultDiffContext
+	}
+	requested = defaultDiffContext + ((requested-defaultDiffContext)/diffContextBatch)*diffContextBatch
+	return min(requested, maxDiffContext)
+}
+
+// nextDiffContext advances one bounded 100-line expansion batch.
+func nextDiffContext(current int) int {
+	return min(max(current, defaultDiffContext)+diffContextBatch, maxDiffContext)
 }
 
 // buildThreadViews filters one discussion to a block and prepares stable UI references.

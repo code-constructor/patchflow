@@ -4,8 +4,10 @@
     <button type="button" class="diff-mode-button" data-diff-viewer-target="splitButton" data-action="diff-viewer#showSplit">Split</button>
     <button type="button" class="diff-mode-button" data-diff-viewer-target="unifiedButton" data-action="diff-viewer#showUnified">Unified</button>
   </div>
+  {{if .CanExpandDiff}}<a class="diff-context-control diff-context-control--before" href="{{.DiffContextPath}}" data-preserve-diff-mode aria-label="Load 100 more context lines above and below the change"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4"/></svg><span>Load 100 more context lines</span></a>{{end}}
   <pre hidden data-diff-viewer-target="source">{{.Source}}</pre>
   <div class="diff-render" data-diff-viewer-target="output"></div>
+  {{if .CanExpandDiff}}<a class="diff-context-control diff-context-control--after" href="{{.DiffContextPath}}" data-preserve-diff-mode aria-label="Load 100 more context lines above and below the change"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg><span>Load 100 more context lines</span></a>{{end}}
   <noscript><pre class="diff">{{.Source}}</pre></noscript>
 </div>
 {{end}}
@@ -18,7 +20,15 @@
   <span class="visually-hidden" data-block-reference-target="status" aria-live="polite"></span>
 </button>{{end}}
 
-{{define "block_actions"}}<div class="block-actions">{{if .Commentable}}<button type="button" class="block-copy block-thread-action" data-action="comment-thread#openBlockThreads" aria-label="Open discussions for {{.ReferenceLabel}}" title="Open discussions"{{if not .Threads}} hidden{{end}}>
+{{define "speech_button"}}<button type="button" class="block-copy block-speech-action" data-speech-target="toggle" data-action="speech#toggle" aria-pressed="false" aria-label="Read this block aloud" title="Read this block aloud">
+  <svg class="block-copy__icon" data-speech-target="playIcon" aria-hidden="true" viewBox="0 0 24 24"><path d="M5 10v4h4l5 4V6l-5 4H5Z"></path><path d="M17 9a4 4 0 0 1 0 6M19.5 6.5a7.5 7.5 0 0 1 0 11"></path></svg>
+  <svg class="block-copy__icon" data-speech-target="pauseIcon" aria-hidden="true" viewBox="0 0 24 24" hidden><path d="M8 6v12M16 6v12"></path></svg>
+  <span class="visually-hidden" data-speech-target="status" aria-live="polite">Read this block aloud</span>
+</button><button type="button" class="block-copy block-speech-stop" data-speech-target="stopButton" data-action="speech#stop" aria-label="Stop reading" title="Stop reading" hidden><svg class="block-copy__icon" aria-hidden="true" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"></rect></svg></button>{{end}}
+
+{{define "speech_action"}}{{if .Readable}}{{template "speech_button" .}}{{end}}{{end}}
+
+{{define "block_actions"}}<div class="block-actions">{{template "speech_action" .}}{{if .Commentable}}<button type="button" class="block-copy block-thread-action" data-action="comment-thread#openBlockThreads" aria-label="Open discussions for {{.ReferenceLabel}}" title="Open discussions"{{if not .Threads}} hidden{{end}}>
   <svg class="block-copy__icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H6l-4 2 1.5-4A9 9 0 1 1 21 12Z"></path><path d="M8 12h8M8 8h5"></path></svg>
 </button><button type="button" class="block-copy block-comment-action" data-action="comment-thread#openComposer" aria-label="Comment on {{.ReferenceLabel}}" title="Add comment">
   <svg class="block-copy__icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H6l-4 2 1.5-4A9 9 0 1 1 21 12Z"></path><path d="M8 12h8M8 8h5"></path></svg>
@@ -75,13 +85,13 @@
 {{define "block"}}
   <turbo-frame id="review-block-{{.ID}}" class="review-block-frame">
   {{if eq .Type "prose"}}
-    <section class="review-block review-block--prose{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-reference-row">{{template "block_actions" .}}</div>{{template "markdown" .Body}}{{template "discussion" .}}</section>
+    <section class="review-block review-block--prose{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread speech" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-reference-row">{{template "block_actions" .}}</div><div data-speech-target="content">{{template "markdown" .Body}}</div>{{template "discussion" .}}</section>
   {{else if eq .Type "callout"}}
-    <aside class="review-block callout callout--{{.Kind}}{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-heading"><div class="eyebrow">{{.Kind}}</div>{{template "block_actions" .}}</div>{{template "markdown" .Body}}{{template "discussion" .}}</aside>
+    <aside class="review-block callout callout--{{.Kind}}{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread speech" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-heading"><div class="eyebrow">{{.Kind}}</div>{{template "block_actions" .}}</div><div data-speech-target="content">{{template "markdown" .Body}}</div>{{template "discussion" .}}</aside>
   {{else if eq .Type "question"}}
-    <aside class="review-block review-question{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-heading"><div class="eyebrow">Open question</div>{{template "block_actions" .}}</div>{{template "markdown" .Body}}{{template "discussion" .}}</aside>
+    <aside class="review-block review-question{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread speech" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-heading"><div class="eyebrow">Open question</div>{{template "block_actions" .}}</div><div data-speech-target="content">{{template "markdown" .Body}}</div>{{template "discussion" .}}</aside>
   {{else if eq .Type "takeaway"}}
-    <aside class="review-block chapter-takeaway{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-heading"><div class="eyebrow">Chapter takeaway</div>{{template "block_actions" .}}</div>{{template "markdown" .Body}}{{template "discussion" .}}</aside>
+    <aside class="review-block chapter-takeaway{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread speech" data-comment-thread-anchors-value="{{.ThreadAnchors}}"><div class="block-heading"><div class="eyebrow">Chapter takeaway</div>{{template "block_actions" .}}</div><div data-speech-target="content">{{template "markdown" .Body}}</div>{{template "discussion" .}}</aside>
   {{else if eq .Type "diff"}}
     <section class="review-block card code-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="comment-thread{{if .Viewed}} plan-file-disclosure{{end}}" data-comment-thread-anchors-value="{{.ThreadAnchors}}"{{if .Viewed}} data-plan-file-disclosure-storage-key-value="{{.ID}}" data-plan-file-disclosure-viewed-key-value="{{.Viewed.Key}}" data-plan-file-disclosure-viewed-value="{{.Viewed.Viewed}}" data-action="patchflow:diff-rendered->comment-thread#enhanceDiff patchflow:viewed@window->plan-file-disclosure#viewedChanged"{{else}} data-action="patchflow:diff-rendered->comment-thread#enhanceDiff"{{end}}>
       <header class="code-card__header"><div class="plan-file-heading">{{if .Viewed}}<button type="button" class="plan-file-toggle{{if .Viewed.Viewed}} is-collapsed{{end}}" data-plan-file-disclosure-target="toggle" data-action="plan-file-disclosure#toggle" aria-expanded="{{if .Viewed.Viewed}}false{{else}}true{{end}}" aria-label="{{if .Viewed.Viewed}}Expand{{else}}Collapse{{end}} file evidence" title="{{if .Viewed.Viewed}}Expand{{else}}Collapse{{end}} file evidence"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></button>{{end}}<div><div class="eyebrow">Changed file</div><h3>{{.Path}}</h3></div></div><div class="code-card__meta">{{if .Focus}}<span class="focus-label">{{.Focus}}</span>{{end}}{{template "viewed_control" .Viewed}}{{template "block_actions" .}}</div></header>
@@ -116,10 +126,10 @@
       {{template "discussion" .}}
     </section>
   {{else if eq .Type "image"}}
-    <figure class="review-block card image-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="image-viewer comment-thread" data-comment-thread-anchors-value="{{.ThreadAnchors}}">
+    <figure class="review-block card image-card{{if .Focused}} is-focused{{end}}" id="{{.ID}}" data-controller="image-viewer comment-thread{{if .Readable}} speech{{end}}" data-comment-thread-anchors-value="{{.ThreadAnchors}}">
       <header class="image-card__header"><div><div class="eyebrow">Review image</div><strong>{{.Path}}</strong></div><div class="image-card__actions">{{template "block_actions" .}}{{if not .Error}}<button type="button" class="diagram-expand" data-action="image-viewer#expand" aria-label="Open image in fullscreen"><span aria-hidden="true">⛶</span> Expand</button>{{end}}</div></header>
       {{if .Error}}<div class="diff-notice">{{.Error}}</div>{{else}}<button type="button" class="image-card__preview" data-action="image-viewer#expand" aria-label="Open {{.Alt}} in fullscreen"><img src="{{.ImageURL}}" alt="{{.Alt}}" loading="lazy" decoding="async"></button>{{end}}
-      {{if .Caption}}<figcaption>{{template "markdown" .Caption}}</figcaption>{{end}}
+      {{if .Caption}}<figcaption data-speech-target="content">{{template "markdown" .Caption}}</figcaption>{{end}}
       {{if not .Error}}<dialog class="image-dialog" data-image-viewer-target="dialog" data-action="click->image-viewer#dismiss close->image-viewer#restore"><div class="image-dialog__surface"><header class="diagram-dialog__header"><div><div class="eyebrow">Review image</div><strong>{{.Path}}</strong></div><button type="button" class="diagram-dialog__close" data-action="image-viewer#close" aria-label="Close fullscreen image">×</button></header><div class="image-dialog__canvas"><img src="{{.ImageURL}}" alt="{{.Alt}}"></div></div></dialog>{{end}}
       {{template "discussion" .}}
     </figure>

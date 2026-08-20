@@ -33,6 +33,33 @@ func TestChangedFilesAndLiteralDiff(t *testing.T) {
 	}
 }
 
+// TestDiffWithContextExpandsCommittedEvidence verifies explicit context without reading the worktree.
+func TestDiffWithContextExpandsCommittedEvidence(t *testing.T) {
+	directory := testRepository(t)
+	prefix := strings.Repeat("// context\n", 150)
+	writeTestFile(t, directory, "app/account.go", prefix+"package before\n"+prefix)
+	runTestGit(t, directory, "add", "app/account.go")
+	runTestGit(t, directory, "commit", "-m", "add contextual source")
+	base := runTestGitOutput(t, directory, "rev-parse", "HEAD")
+	writeTestFile(t, directory, "app/account.go", prefix+"package changed\n"+prefix)
+	runTestGit(t, directory, "add", "app/account.go")
+	runTestGit(t, directory, "commit", "-m", "move change into context")
+	target := runTestGitOutput(t, directory, "rev-parse", "HEAD")
+	repository, _ := Open(directory)
+
+	compact, err := repository.DiffWithContext(strings.TrimSpace(base), strings.TrimSpace(target), "app/account.go", "", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expanded, err := repository.DiffWithContext(strings.TrimSpace(base), strings.TrimSpace(target), "app/account.go", "", 103)
+	if err != nil || len(expanded) <= len(compact) {
+		t.Fatalf("expanded diff did not add context: %v", err)
+	}
+	if _, err := repository.DiffWithContext(strings.TrimSpace(base), strings.TrimSpace(target), "app/account.go", "", 100_004); err == nil {
+		t.Fatal("expected excessive context rejection")
+	}
+}
+
 // TestUserNameReadsEffectiveRepositoryConfiguration protects reviewer attribution.
 func TestUserNameReadsEffectiveRepositoryConfiguration(t *testing.T) {
 	directory := testRepository(t)
@@ -143,6 +170,17 @@ func runTestGit(t *testing.T, directory string, args ...string) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
+}
+
+// runTestGitOutput executes a fixture command and returns its standard output.
+func runTestGitOutput(t *testing.T, directory string, args ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", directory}, args...)...)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, output)
+	}
+	return string(output)
 }
 
 // writeTestFile creates parent directories and writes one repository fixture file.

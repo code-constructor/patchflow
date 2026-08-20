@@ -92,7 +92,7 @@ func (a *App) files(w http.ResponseWriter, r *http.Request) {
 		frameID := fileFrameID(selectedPath)
 		if r.Header.Get("Turbo-Frame") == frameID {
 			file, _ := findChangedFile(stored.Review.Change.Files, selectedPath)
-			selected, alert := buildSelectedFileView(repository, store, stored, basePath, file, viewed[file.Path], "")
+			selected, alert := buildSelectedFileView(repository, store, stored, basePath, file, viewed[file.Path], requestedDiffContext(r), "")
 			if alert != "" {
 				selected.Diff.Error = alert
 			}
@@ -141,7 +141,7 @@ func changedFilesLabel(count int) string {
 }
 
 // buildSelectedFileView resolves one exact-SHA patch and any discussion attached in the plan.
-func buildSelectedFileView(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, basePath string, file artifact.ChangedFile, viewed bool, alert string) (*SelectedFileView, string) {
+func buildSelectedFileView(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, basePath string, file artifact.ChangedFile, viewed bool, diffContext int, alert string) (*SelectedFileView, string) {
 	block, commentable := reviewDiffBlock(stored.Review, file.Path)
 	blockIDs := reviewBlockIDsForPath(stored.Review, file.Path)
 	if !commentable {
@@ -149,8 +149,11 @@ func buildSelectedFileView(repository *gitrepo.Repository, store *patchreview.St
 	}
 	block.Collapsed = false
 	block.Focus = nil
-	diff := buildBlock(repository, store, stored, map[string]artifact.ChangedFile{file.Path: file}, block)
+	diff := buildBlock(repository, store, stored, map[string]artifact.ChangedFile{file.Path: file}, block, diffContext)
 	diff.ReferencePath = reviewFilePath(basePath, stored.Review.ID, file.Path)
+	if diff.CanExpandDiff {
+		diff.DiffContextPath = diff.ReferencePath + "?context=" + fmt.Sprintf("%d", nextDiffContext(diffContext))
+	}
 	diff.ReferenceLabel = "file " + file.Path
 	diff.Label = file.Path
 	diff.Viewed = viewedControl(basePath, stored, file.Path, viewed)
