@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
-	"github.com/traqx-ai/patchflow/internal/gitrepo"
+	"github.com/code-constructor/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/gitrepo"
 )
 
 // Creator turns a committed Git comparison into a stored baseline review.

@@ -8,9 +8,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
-	"github.com/traqx-ai/patchflow/internal/gitrepo"
-	patchreview "github.com/traqx-ai/patchflow/internal/review"
+	"github.com/code-constructor/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/gitrepo"
+	patchreview "github.com/code-constructor/patchflow/internal/review"
 )
 
 // ReviewNavigationView describes the global views available within one review.

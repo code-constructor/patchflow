@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/artifact"
 )
 
 // MaxDiffBytes is the largest patch the current browser renderer will accept.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/traqx-ai/patchflow/internal/gitrepo"
+	"github.com/code-constructor/patchflow/internal/gitrepo"
 )
 
 // TestVerifierAcceptsCreatorOutput proves the generated baseline is repository-complete.

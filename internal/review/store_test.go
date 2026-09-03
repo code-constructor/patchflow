@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/traqx-ai/patchflow/internal/gitrepo"
+	"github.com/code-constructor/patchflow/internal/gitrepo"
 )
 
 // TestCreatorPersistsValidV2Review exercises the complete Git-to-artifact creation path.

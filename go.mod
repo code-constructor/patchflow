@@ -1,4 +1,4 @@
-module github.com/traqx-ai/patchflow
+module github.com/code-constructor/patchflow
 
 go 1.24.0
 

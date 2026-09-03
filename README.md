@@ -18,6 +18,23 @@ later.
 > Patchflow is in early development. The first local end-to-end review workflow
 > is available, but its artifact schema and user experience are still evolving.
 
+## Screenshots
+
+The review overview states the purpose, decision, evidence, and reading path
+before any code is shown:
+
+![Review overview with contract and ordered reading path](docs/screenshots/review-overview.png)
+
+Each review step is a chapter that combines prose, review questions, and
+syntax-highlighted split or unified diffs bound to immutable commits:
+
+![Review chapter with a review question and split diff](docs/screenshots/review-chapter.png)
+
+The classic **Files changed** view keeps a collapsible change tree beside one
+continuous, lazily loaded diff stream:
+
+![Files changed view with change tree and split diff](docs/screenshots/files-changed.png)
+
 ## Why Patchflow?
 
 Large changes are rarely easiest to understand alphabetically or in raw Git
@@ -188,26 +205,60 @@ bin/dev
 
 The development server is available at <http://localhost:3000> by default.
 
-### Docker and the local development proxy
+### Configuration
 
-Docker is an optional development path. When the shared `dev-proxy` Traefik
-network is available, start Patchflow with:
+Patchflow needs no configuration to start. Every machine-specific value has a
+flag and an environment variable so nothing has to be edited in the source:
+
+| Setting | Flag | Environment variable | Default |
+| --- | --- | --- | --- |
+| Listen address | `--addr` | `PATCHFLOW_ADDR` | `127.0.0.1:3000` |
+| Preselected repository | `--repository` | `PATCHFLOW_REPOSITORY` (via `bin/dev`) | none |
+| Settings file | `--config` | `PATCHFLOW_CONFIG_PATH` (Docker) | `$XDG_CONFIG_HOME/patchflow/config.json` |
+| Repository picker root | `--browse-root` | `PATCHFLOW_BROWSE_ROOT` | discovered, see below |
+| Local speech provider | `--tts-url` | `PATCHFLOW_TTS_URL` | none, speech controls hidden |
+| Speech voice name | `--tts-voice` | `PATCHFLOW_TTS_VOICE` | provider default |
+
+The **Browse…** button opens a server-side repository picker that cannot leave
+its root. Without an explicit root, Patchflow uses the parent directory of the
+preselected repository, then `/workspace` or `~/Projects` when one of them
+exists, and finally the current working directory. Set `--browse-root` to any
+absolute directory to make a different tree browsable.
+
+### Docker
+
+Docker is an optional path that runs the same binary with a mounted workspace.
+Copy `.env.example` to `.env` to adjust host paths, the published port, the
+container user, or the optional speech stack; every variable has a default.
 
 ```sh
-dev-proxy up
+cp .env.example .env    # optional
 docker compose up --build
 ```
 
-Patchflow is then available at <http://patchflow.localhost>. No host port is
-claimed by the application container; Traefik discovers it from Compose labels.
-Compose also creates an original, calm Sci-Fi assistant voice with Qwen3-TTS
-VoiceDesign and serves it through Chatterbox Turbo. Models and the generated
-reference live in the `patchflow-speech-models` Docker volume. The first start
-downloads the models and is therefore substantially slower; later starts reuse
-the local volume. Voice design uses the host's AMD ROCm devices once, while
-streaming synthesis runs on the CPU and keeps the GPU free. The speech service
-is reachable only from the Compose network. The browser talks to Patchflow,
-never directly to the synthesis service.
+Patchflow is then available at <http://127.0.0.1:3000>. The directory named by
+`PATCHFLOW_PROJECTS_PATH` (default `$HOME/Projects`) is mounted at `/workspace`
+and is the picker root. Linked Git worktrees store absolute host paths in their
+`.git` metadata, so the same directory is mirrored at its original host path
+inside the container as well.
+
+Additional repository roots, a reverse proxy such as Traefik instead of a
+published port, and GPU access for voice design live in the Git-ignored
+`compose.override.yaml`. Copy `compose.override.example.yaml` and keep the
+sections you need; every additional root should follow the same two-mount
+pattern:
+
+```yaml
+services:
+  app:
+    volumes:
+      - /host/worktrees:/workspace/worktrees
+      - /host/worktrees:/host/worktrees
+```
+
+The Compose setup mounts the host's XDG Git configuration read-only so comment
+forms can use `git config user.name`. If your global Git configuration lives
+elsewhere, set `PATCHFLOW_GIT_CONFIG_PATH` (for example `$HOME/.gitconfig`).
 
 The container also exports the server's config path to CLI subprocesses. A
 Coding Agent can therefore create and register a review without opening the
@@ -218,56 +269,13 @@ docker compose exec -w /workspace/example app \
   patchflow create --format json
 ```
 
-The host's `$HOME/Projects` directory is mounted at `/workspace`, allowing
-Patchflow to review local projects. Herdr worktrees from `$HOME/.herdr/worktrees`
-are mounted at `/workspace/worktrees` as well. Override that source when needed:
-
-```sh
-PATCHFLOW_WORKTREES_PATH=/another/worktree/root docker compose up --build
-```
-
-Any number of additional repository roots can be mounted beneath `/workspace`.
-Copy `compose.mounts.example.yaml` to the Git-ignored `compose.override.yaml`,
-then add one named target per host directory:
-
-```yaml
-services:
-  app:
-    volumes:
-      - /host/client-projects:/workspace/client-projects
-      - /host/other-worktrees:/workspace/other-worktrees
-      # Required when linked-worktree metadata points at these host paths:
-      - /host/client-projects:/host/client-projects
-      - /host/other-worktrees:/host/other-worktrees
-```
-
-For example, `$HOME/Projects/example` is selected as `/workspace/example`, while
-a Herdr worktree appears below `/workspace/worktrees`.
-Linked Git worktrees store absolute paths in their `.git` metadata. The default
-Compose setup therefore mirrors both standard roots at their original host
-paths inside the container as well. Additional worktree mounts should follow
-the same two-mount pattern shown above.
-
-The Compose setup also mounts the host's XDG Git configuration read-only so
-comment forms can use `git config user.name`. If your global Git configuration
-lives elsewhere, point Patchflow at it explicitly:
-
-```sh
-PATCHFLOW_GIT_CONFIG_PATH="$HOME/.gitconfig" docker compose up --build
-```
-
-The **Browse…** button opens a server-side repository picker rooted at
-`/workspace`, so container paths do not need to be entered by hand. In local
-development the picker starts beside the preselected repository or in the
-user's `Projects` directory.
-
 Each opened repository receives a short URL namespace such as
 `/repositories/4a1f…/reviews/<review-id>`. The absolute local path remains in a
 versioned user configuration rather than the URL or browser session. Native
 execution uses `$XDG_CONFIG_HOME/patchflow/config.json` (normally
-`~/.config/patchflow/config.json`). The Docker development setup uses
-`/workspace/.patchflow/config.json`, persisted on the host as
-`$HOME/Projects/.patchflow/config.json`; override the container path with
+`~/.config/patchflow/config.json`). The Docker setup uses
+`/workspace/.patchflow/config.json`, persisted on the host inside the mounted
+projects directory; override the container path with
 `PATCHFLOW_DOCKER_CONFIG_PATH` when required.
 
 Tabs and even separate browsers can therefore keep reviews from different
@@ -303,12 +311,6 @@ extensible for future preferences:
 }
 ```
 
-An explicit path is also available outside Docker:
-
-```sh
-patchflow serve --config /path/to/config.json
-```
-
 The image runs as UID and GID `1000` by default so review artifacts remain owned
 by the developer. Override these values on systems with different IDs:
 
@@ -316,8 +318,25 @@ by the developer. Override these values on systems with different IDs:
 PATCHFLOW_UID="$(id -u)" PATCHFLOW_GID="$(id -g)" docker compose up --build
 ```
 
-Use `DEV_DOMAIN` to select another `*.localhost` hostname. This Docker workflow
-is a convenience; Patchflow itself requires only its compiled binary and Git.
+### Optional local speech
+
+The read-aloud controls need a local speech provider. The Compose profile
+`speech` builds one from Qwen3-TTS VoiceDesign (creates an original assistant
+voice once) and Chatterbox Turbo (streams the speech). Enable it in `.env`:
+
+```sh
+COMPOSE_PROFILES=speech
+PATCHFLOW_TTS_URL=http://speech:5000
+```
+
+Models and the generated reference voice live in the `patchflow-speech-models`
+Docker volume, so the first start downloads several gigabytes and is
+substantially slower. Voice design runs on the CPU by default; attach an NVIDIA
+or AMD GPU through `compose.override.example.yaml` and, for AMD, point
+`PATCHFLOW_TORCH_IMAGE` at a `rocm/pytorch` tag. Streaming synthesis runs on the
+CPU. The speech service is reachable only from the Compose network; the browser
+talks to Patchflow, never directly to the synthesis service. See the
+[text-to-speech design note](docs/text-to-speech.md) for details.
 
 ## Try the review workflow
 
@@ -399,7 +418,8 @@ selected:
 bin/patchflow serve --repository /absolute/path/to/repository
 ```
 
-The server listens on <http://127.0.0.1:3000>. Build the self-contained binary
+The server listens on <http://127.0.0.1:3000> unless `--addr` or
+`PATCHFLOW_ADDR` says otherwise. Build the self-contained binary
 with `go build -o patchflow ./cmd/patchflow`; it contains the templates, CSS,
 JavaScript modules, schema, and vendored browser libraries.
 
@@ -429,7 +449,7 @@ bin/docs
 ```
 
 Pass an import path to inspect one package, for example
-`bin/docs github.com/traqx-ai/patchflow/internal/gitrepo`. The CI pipeline checks
+`bin/docs github.com/code-constructor/patchflow/internal/gitrepo`. The CI pipeline checks
 both the documentation convention and the documentation command, so new
 undocumented functions cannot enter unnoticed.
 
@@ -445,3 +465,10 @@ undocumented functions cannot enter unnoticed.
   selected repository.
 - **Monorepo:** the Go application, embedded frontend, schemas, fixtures, docs,
   and agent skills evolve in the same repository.
+
+## License
+
+Patchflow is released under the [MIT License](LICENSE). Vendored browser
+libraries under `internal/web/assets/vendor/` keep their own licenses
+(Diff2Html, marked, Stimulus, Turbo, and Mermaid under MIT; DOMPurify under
+Apache 2.0 / MPL 2.0).

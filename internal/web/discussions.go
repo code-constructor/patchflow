@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
-	patchreview "github.com/traqx-ai/patchflow/internal/review"
+	"github.com/code-constructor/patchflow/internal/artifact"
+	patchreview "github.com/code-constructor/patchflow/internal/review"
 )
 
 // DiscussionsView presents every review thread in narrative plan order.

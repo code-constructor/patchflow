@@ -9,8 +9,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/traqx-ai/patchflow/internal/gitrepo"
-	patchreview "github.com/traqx-ai/patchflow/internal/review"
+	"github.com/code-constructor/patchflow/internal/gitrepo"
+	patchreview "github.com/code-constructor/patchflow/internal/review"
 	yaml "go.yaml.in/yaml/v3"
 )
 

@@ -1,0 +1,49 @@
+# Copy this file to compose.override.yaml (Git-ignored) and keep only the
+# sections you need. Compose merges it into compose.yaml automatically.
+
+services:
+  app:
+    volumes:
+      # Additional repository roots. Keep every container target below
+      # /workspace so it appears in Patchflow's bounded repository picker, and
+      # mirror each root at its host path so linked worktrees keep resolving.
+      - /absolute/path/to/worktrees:/workspace/worktrees
+      - /absolute/path/to/worktrees:/absolute/path/to/worktrees
+
+    # Reverse proxy instead of a published port: remove the port mapping and
+    # let a Traefik instance on an external network discover the container.
+    # ports: !reset []
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.patchflow.rule=Host(`patchflow.localhost`)"
+    #   - "traefik.http.services.patchflow.loadbalancer.server.port=3000"
+    # networks:
+    #   - default
+    #   - dev-proxy
+
+  # GPU for the one-time voice design (profile "speech"). Pick one block and
+  # set PATCHFLOW_VOICE_DESIGN_DEVICE=cuda:0 and PATCHFLOW_VOICE_DESIGN_DTYPE=bfloat16
+  # in .env. AMD hosts also need PATCHFLOW_TORCH_IMAGE set to a rocm/pytorch tag.
+  # voice-design:
+  #   # NVIDIA (requires the NVIDIA Container Toolkit):
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: 1
+  #             capabilities: [gpu]
+  #   # AMD ROCm:
+  #   devices:
+  #     - /dev/kfd:/dev/kfd
+  #     - /dev/dri:/dev/dri
+  #   group_add:
+  #     - video
+  #   ipc: host
+  #   shm_size: 8gb
+  #   environment:
+  #     TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL: "1"
+
+# networks:
+#   dev-proxy:
+#     external: true

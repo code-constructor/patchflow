@@ -22,11 +22,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
-	"github.com/traqx-ai/patchflow/internal/gitrepo"
-	patchreview "github.com/traqx-ai/patchflow/internal/review"
-	patchsettings "github.com/traqx-ai/patchflow/internal/settings"
-	patchspeech "github.com/traqx-ai/patchflow/internal/speech"
+	"github.com/code-constructor/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/gitrepo"
+	patchreview "github.com/code-constructor/patchflow/internal/review"
+	patchsettings "github.com/code-constructor/patchflow/internal/settings"
+	patchspeech "github.com/code-constructor/patchflow/internal/speech"
 )
 
 //go:embed templates/*.html assets
@@ -268,12 +268,54 @@ func NewAppWithSettings(defaultRepository, settingsPath string, logger *slog.Log
 
 // NewAppWithSettingsAndSpeech assembles the application with persistent settings and local speech synthesis.
 func NewAppWithSettingsAndSpeech(defaultRepository, settingsPath string, synthesizer patchspeech.Synthesizer, logger *slog.Logger) (*App, error) {
-	app, err := newApp(defaultRepository, settingsPath, logger)
+	return NewAppWithOptions(Options{DefaultRepository: defaultRepository, SettingsPath: settingsPath, Speech: synthesizer, Logger: logger})
+}
+
+// Options collects every deployment-specific input of the local application.
+type Options struct {
+	// DefaultRepository is preselected when the server starts; empty shows the picker.
+	DefaultRepository string
+	// SettingsPath overrides the user configuration file location.
+	SettingsPath string
+	// BrowseRoot bounds the repository picker; empty falls back to discovery.
+	BrowseRoot string
+	// Speech is the optional local synthesizer behind the read-aloud controls.
+	Speech patchspeech.Synthesizer
+	// Logger receives request and validation diagnostics; nil uses slog.Default.
+	Logger *slog.Logger
+}
+
+// NewAppWithOptions assembles the application from explicit deployment options.
+func NewAppWithOptions(options Options) (*App, error) {
+	app, err := newApp(options.DefaultRepository, options.SettingsPath, options.Logger)
 	if err != nil {
 		return nil, err
 	}
-	app.speech = synthesizer
+	app.speech = options.Speech
+	if options.BrowseRoot != "" {
+		root, rootErr := browseRootFromOption(options.BrowseRoot)
+		if rootErr != nil {
+			return nil, rootErr
+		}
+		app.browseRoot = root
+	}
 	return app, nil
+}
+
+// browseRootFromOption validates an explicitly configured picker root.
+func browseRootFromOption(root string) (string, error) {
+	if !filepath.IsAbs(root) {
+		return "", fmt.Errorf("browse root must be an absolute path: %s", root)
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("cannot access browse root: %w", err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil || !info.IsDir() {
+		return "", fmt.Errorf("browse root is not a directory: %s", root)
+	}
+	return resolved, nil
 }
 
 // newApp assembles the application with an injectable settings path for isolated tests.

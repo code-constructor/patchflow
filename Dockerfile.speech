@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1
 
-FROM rocm/pytorch:rocm7.2.4_ubuntu24.04_py3.12_pytorch_release_2.9.1
+# Any image with Python 3.12 and PyTorch 2.9 works. The default runs on CPU and
+# NVIDIA GPUs; set TORCH_IMAGE to a rocm/pytorch tag for AMD GPUs.
+ARG TORCH_IMAGE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
+FROM ${TORCH_IMAGE}
 
 # This pinned upstream PR adds the chunk iterator used for real audio streaming.
 ARG CHATTERBOX_REVISION=ce5a900dbdbc776eeb3d00c1c1607143c7604a5b
@@ -26,8 +29,7 @@ COPY speech/chatterbox_server.py /app/chatterbox_server.py
 
 ENV HF_HOME=/models/huggingface \
     PATCHFLOW_TTS_VOICE_PATH=/models/voice/reference.wav \
-    PATCHFLOW_TTS_DEVICE=cpu \
-    TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
+    PATCHFLOW_TTS_DEVICE=cpu
 
 EXPOSE 5000
 ENTRYPOINT ["python3", "/app/chatterbox_server.py"]

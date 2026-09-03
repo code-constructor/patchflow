@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
-	"github.com/traqx-ai/patchflow/internal/gitrepo"
+	"github.com/code-constructor/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/gitrepo"
 )
 
 // VerificationErrors collects repository-backed problems an agent can correct.

@@ -10,12 +10,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
-	"github.com/traqx-ai/patchflow/internal/gitrepo"
-	patchreview "github.com/traqx-ai/patchflow/internal/review"
-	patchsettings "github.com/traqx-ai/patchflow/internal/settings"
-	patchspeech "github.com/traqx-ai/patchflow/internal/speech"
-	patchflowweb "github.com/traqx-ai/patchflow/internal/web"
+	"github.com/code-constructor/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/gitrepo"
+	patchreview "github.com/code-constructor/patchflow/internal/review"
+	patchsettings "github.com/code-constructor/patchflow/internal/settings"
+	patchspeech "github.com/code-constructor/patchflow/internal/speech"
+	patchflowweb "github.com/code-constructor/patchflow/internal/web"
 )
 
 // main passes command-line arguments to the testable command dispatcher.
@@ -264,14 +264,15 @@ func serve(arguments []string) int {
 	reviewPath := flags.String("review", "", "deprecated: path to review.yaml")
 	repositoryPath := flags.String("repository", "", "repository selected when the server starts")
 	settingsPath := flags.String("config", "", "path to the Patchflow user configuration")
-	address := flags.String("addr", "127.0.0.1:3000", "listen address")
+	address := flags.String("addr", environmentOr("PATCHFLOW_ADDR", "127.0.0.1:3000"), "listen address")
+	browseRoot := flags.String("browse-root", os.Getenv("PATCHFLOW_BROWSE_ROOT"), "directory the repository picker may browse; discovered when omitted")
 	ttsURL := flags.String("tts-url", os.Getenv("PATCHFLOW_TTS_URL"), "local speech provider HTTP URL")
 	ttsVoice := flags.String("tts-voice", os.Getenv("PATCHFLOW_TTS_VOICE"), "optional speech provider voice name")
 	if err := flags.Parse(arguments); err != nil {
 		return 2
 	}
 	if flags.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "Usage: patchflow serve [--repository PATH] [--config PATH] [--addr 127.0.0.1:3000] [--tts-url URL] [--tts-voice NAME]")
+		fmt.Fprintln(os.Stderr, "Usage: patchflow serve [--repository PATH] [--config PATH] [--addr 127.0.0.1:3000] [--browse-root PATH] [--tts-url URL] [--tts-voice NAME]")
 		return 2
 	}
 	if *repositoryPath == "" && *reviewPath != "" {
@@ -286,7 +287,7 @@ func serve(arguments []string) int {
 			return 1
 		}
 	}
-	handler, err := patchflowweb.NewAppWithSettingsAndSpeech(*repositoryPath, *settingsPath, synthesizer, nil)
+	handler, err := patchflowweb.NewAppWithOptions(patchflowweb.Options{DefaultRepository: *repositoryPath, SettingsPath: *settingsPath, BrowseRoot: *browseRoot, Speech: synthesizer})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -297,6 +298,14 @@ func serve(arguments []string) int {
 		return 1
 	}
 	return 0
+}
+
+// environmentOr returns the named environment variable or a fallback when it is unset or empty.
+func environmentOr(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	return fallback
 }
 
 // create resolves a committed Git comparison and persists its baseline review artifact.

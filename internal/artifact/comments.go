@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/code-constructor/patchflow/schema"
 	"github.com/santhosh-tekuri/jsonschema/v6"
-	"github.com/traqx-ai/patchflow/schema"
 	yaml "go.yaml.in/yaml/v3"
 )
 

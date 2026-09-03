@@ -39,15 +39,21 @@ It explicitly excludes imitation of a real person or an existing fictional
 character. Patchflow does not ship or clone the voice of Cortana or performer
 Jen Taylor.
 
-Qwen voice design runs once on the host's AMD ROCm device and writes its result
-to the `patchflow-speech-models` Docker volume. Chatterbox then streams on the
-CPU; this produced lower and more stable time-to-first-audio on the development
-machine than its AMD GPU path. Tune the local trade-off with:
+Both services belong to the Compose profile `speech` and stay off unless
+`COMPOSE_PROFILES=speech` and `PATCHFLOW_TTS_URL=http://speech:5000` are set,
+for example in `.env`. Qwen voice design runs once and writes its result to the
+`patchflow-speech-models` Docker volume. It defaults to the CPU; a GPU is
+attached through `compose.override.yaml` (see `compose.override.example.yaml`)
+together with `PATCHFLOW_VOICE_DESIGN_DEVICE=cuda:0` and
+`PATCHFLOW_VOICE_DESIGN_DTYPE=bfloat16`. AMD hosts additionally set
+`PATCHFLOW_TORCH_IMAGE` to a `rocm/pytorch` tag; the default image serves CPU
+and NVIDIA hosts. Chatterbox then streams on the CPU, which produced lower and
+more stable time-to-first-audio on the development machine than its GPU path.
+Tune the local trade-off in `.env`:
 
 ```sh
-PATCHFLOW_TTS_THREADS=16 \
-PATCHFLOW_TTS_CHUNK_TOKENS=24 \
-docker compose up -d --build
+PATCHFLOW_TTS_THREADS=16
+PATCHFLOW_TTS_CHUNK_TOKENS=24
 ```
 
 Smaller token chunks can arrive earlier but increase boundary overhead. Larger

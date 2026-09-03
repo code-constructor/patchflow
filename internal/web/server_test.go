@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
-	"github.com/traqx-ai/patchflow/internal/gitrepo"
-	patchreview "github.com/traqx-ai/patchflow/internal/review"
-	patchspeech "github.com/traqx-ai/patchflow/internal/speech"
+	"github.com/code-constructor/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/gitrepo"
+	patchreview "github.com/code-constructor/patchflow/internal/review"
+	patchspeech "github.com/code-constructor/patchflow/internal/speech"
 	yaml "go.yaml.in/yaml/v3"
 )
 
@@ -90,12 +90,12 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	basePath := strings.Split(reviewPath, "/reviews/")[0]
 
 	overview := perform(app, http.MethodGet, reviewPath, "")
-	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/steps/domain\"") || !strings.Contains(overview.Body.String(), "href=\"https://github.com/traqx-ai/patchflow\"") || !strings.Contains(overview.Body.String(), "aria-label=\"Open repository on GitHub\"") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/files/app/controllers/sessions_controller.rb\"") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/discussions\"") || !strings.Contains(overview.Body.String(), "data-review-tabs-view-value=\"plan\"") || !strings.Contains(overview.Body.String(), "data-navigation-fallback-value=\""+basePath+"\"") || !strings.Contains(overview.Body.String(), "data-action=\"navigation#back\"") || !strings.Contains(overview.Body.String(), "data-controller=\"speech\"") || !strings.Contains(overview.Body.String(), "data-speech-target=\"content\"") {
+	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/steps/domain\"") || !strings.Contains(overview.Body.String(), "href=\"https://github.com/code-constructor/patchflow\"") || !strings.Contains(overview.Body.String(), "aria-label=\"Open repository on GitHub\"") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/files/app/controllers/sessions_controller.rb\"") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/discussions\"") || !strings.Contains(overview.Body.String(), "data-review-tabs-view-value=\"plan\"") || !strings.Contains(overview.Body.String(), "data-navigation-fallback-value=\""+basePath+"\"") || !strings.Contains(overview.Body.String(), "data-action=\"navigation#back\"") || !strings.Contains(overview.Body.String(), "data-controller=\"speech\"") || !strings.Contains(overview.Body.String(), "data-speech-target=\"content\"") {
 		t.Fatalf("unexpected overview: %d %s", overview.Code, overview.Body.String())
 	}
 
 	chapter := perform(app, http.MethodGet, reviewPath+"/steps/domain", "")
-	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\"", "id=\"domain-intro\"", "id=\"review-block-domain-intro\"", "class=\"review-block-frame\"", "type=\"button\"", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-intro\"", "aria-label=\"Copy path for block domain-intro\"", "data-controller=\"chapter-navigation\"", "data-controller=\"comment-thread speech\"", "data-speech-target=\"content\"", "data-action=\"speech#toggle\"", "data-action=\"speech#stop\"", "aria-label=\"Read this block aloud\"", "Review question", "Does the domain behavior", "Chapter takeaway", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-takeaway\"", "class=\"site-action site-action--workspace\"", "href=\"" + reviewPath + "\" class=\"site-action\" aria-label=\"Review overview\"", "data-navigation-fallback-value=\"" + reviewPath + "\"", "href=\"https://github.com/traqx-ai/patchflow\"", "class=\"chapter-step-nav\"", "href=\"" + reviewPath + "/steps/security\" rel=\"prev\"", "aria-label=\"Previous step: Inspect security-sensitive behavior\"", "href=\"" + reviewPath + "/steps/tests\" rel=\"next\"", "aria-label=\"Next step: Verify the intended behavior\""} {
+	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\"", "id=\"domain-intro\"", "id=\"review-block-domain-intro\"", "class=\"review-block-frame\"", "type=\"button\"", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-intro\"", "aria-label=\"Copy path for block domain-intro\"", "data-controller=\"chapter-navigation\"", "data-controller=\"comment-thread speech\"", "data-speech-target=\"content\"", "data-action=\"speech#toggle\"", "data-action=\"speech#stop\"", "aria-label=\"Read this block aloud\"", "Review question", "Does the domain behavior", "Chapter takeaway", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-takeaway\"", "class=\"site-action site-action--workspace\"", "href=\"" + reviewPath + "\" class=\"site-action\" aria-label=\"Review overview\"", "data-navigation-fallback-value=\"" + reviewPath + "\"", "href=\"https://github.com/code-constructor/patchflow\"", "class=\"chapter-step-nav\"", "href=\"" + reviewPath + "/steps/security\" rel=\"prev\"", "aria-label=\"Previous step: Inspect security-sensitive behavior\"", "href=\"" + reviewPath + "/steps/tests\" rel=\"next\"", "aria-label=\"Next step: Verify the intended behavior\""} {
 		if !strings.Contains(chapter.Body.String(), expected) {
 			t.Errorf("chapter missing %q", expected)
 		}
@@ -767,7 +767,7 @@ func featureRepository(t *testing.T) string {
 	git(t, directory, "init", "-b", "main")
 	git(t, directory, "config", "user.email", "patchflow@example.test")
 	git(t, directory, "config", "user.name", "Patchflow Test")
-	git(t, directory, "remote", "add", "origin", "git@github.com:traqx-ai/patchflow.git")
+	git(t, directory, "remote", "add", "origin", "git@github.com:code-constructor/patchflow.git")
 	prefix := "class Account\n" + strings.Repeat("  # unchanged context\n", 125)
 	suffix := strings.Repeat("  # more unchanged context\n", 125) + "end\n"
 	write(t, directory, "app/models/account.rb", prefix+"  def locked? = false\n"+suffix)
