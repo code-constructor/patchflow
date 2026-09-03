@@ -177,7 +177,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		t.Fatalf("comment thread controller unavailable: %d", commentController.Code)
 	}
 	documentController := perform(app, http.MethodGet, "/assets/controllers/review_document_controller.js", "")
-	if documentController.Code != http.StatusOK || !strings.Contains(documentController.Body.String(), "link.dataset.turboFrame = \"_top\"") {
+	if documentController.Code != http.StatusOK || !strings.Contains(documentController.Body.String(), "link.dataset.turboFrame = \"_top\"") || !strings.Contains(documentController.Body.String(), "htmlLabels: false") || !strings.Contains(documentController.Body.String(), "diagramSequence++") {
 		t.Fatalf("review prose links are not protected from block-frame navigation: %d", documentController.Code)
 	}
 	diagramController := perform(app, http.MethodGet, "/assets/controllers/diagram_viewer_controller.js", "")

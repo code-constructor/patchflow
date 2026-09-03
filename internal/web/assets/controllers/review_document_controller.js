@@ -2,6 +2,8 @@ import { Controller } from "@hotwired/stimulus"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
 
+let diagramSequence = 0
+
 export default class extends Controller {
   static targets = ["source", "output"]
 
@@ -29,7 +31,10 @@ export default class extends Controller {
     globalThis.mermaid.initialize({
       startOnLoad: false,
       securityLevel: "strict",
-      theme: "neutral"
+      theme: "neutral",
+      // DOMPurify's strict SVG profile intentionally removes foreignObject.
+      // Render labels as native SVG text so sanitizing cannot erase them.
+      htmlLabels: false
     })
 
     const diagrams = this.outputTarget.querySelectorAll("pre > code.language-mermaid")
@@ -39,7 +44,7 @@ export default class extends Controller {
       source.parentElement.replaceWith(container)
 
       try {
-        const identifier = `patchflow-mermaid-${Date.now()}-${index}`
+        const identifier = `patchflow-mermaid-${Date.now()}-${diagramSequence++}-${index}`
         const { svg, bindFunctions } = await globalThis.mermaid.render(identifier, source.textContent)
         container.innerHTML = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, svgFilters: true } })
         bindFunctions?.(container)
