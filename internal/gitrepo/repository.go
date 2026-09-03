@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/artifact"
 )
 
 // MaxDiffBytes is the largest patch the current browser renderer will accept.
@@ -126,6 +126,28 @@ func (r *Repository) GitHubReference(targetRef string) (*GitHubReference, error)
 	return nil, nil
 }
 
+// DefaultBaseRef finds a conventional local default branch without consulting the network.
+func (r *Repository) DefaultBaseRef() (string, error) {
+	candidates := []string{}
+	if remoteHead, err := r.git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
+		if remoteHead = strings.TrimSpace(remoteHead); remoteHead != "" {
+			candidates = append(candidates, remoteHead)
+		}
+	}
+	candidates = append(candidates, "main", "master", "origin/main", "origin/master")
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		if _, err := r.ResolveCommit(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", &Error{Message: "Cannot detect the base branch; pass --base with a local branch, tag, or commit"}
+}
+
 // parseGitHubRemote normalizes supported HTTPS, SSH, Git, and SCP-like remote forms.
 func parseGitHubRemote(remote string) (string, bool) {
 	path := ""
@@ -197,6 +219,11 @@ func (r *Repository) ChangedFiles(baseSHA, targetSHA string) ([]artifact.Changed
 
 // Diff returns a literal-path patch for one changed file, bounded by the display limit.
 func (r *Repository) Diff(baseSHA, targetSHA, path, previousPath string) (string, error) {
+	return r.DiffWithContext(baseSHA, targetSHA, path, previousPath, 3)
+}
+
+// DiffWithContext returns a literal-path patch with the requested surrounding lines.
+func (r *Repository) DiffWithContext(baseSHA, targetSHA, path, previousPath string, contextLines int) (string, error) {
 	if err := validateSHA(baseSHA); err != nil {
 		return "", err
 	}
@@ -213,7 +240,10 @@ func (r *Repository) Diff(baseSHA, targetSHA, path, previousPath string) (string
 		}
 		paths = append(paths, ":(literal)"+previousPath)
 	}
-	args := []string{"diff", "--no-ext-diff", "--no-color", "--unified=3", "--find-renames", baseSHA, targetSHA, "--"}
+	if contextLines < 0 || contextLines > 100_003 {
+		return "", &Error{Message: "Diff context must contain between 0 and 100003 lines"}
+	}
+	args := []string{"diff", "--no-ext-diff", "--no-color", fmt.Sprintf("--unified=%d", contextLines), "--find-renames", baseSHA, targetSHA, "--"}
 	output, err := r.git(append(args, paths...)...)
 	if err != nil {
 		return "", err
@@ -243,6 +273,28 @@ func (r *Repository) FileExcerpt(sha, path string, startLine, endLine int) (stri
 	start := min(startLine-1, len(lines))
 	end := min(endLine, len(lines))
 	return strings.Join(lines[start:end], ""), nil
+}
+
+// FileLineCount returns the number of addressable lines in one committed text file.
+func (r *Repository) FileLineCount(sha, path string) (int, error) {
+	if err := validateSHA(sha); err != nil {
+		return 0, err
+	}
+	if err := validatePath(path); err != nil {
+		return 0, err
+	}
+	content, err := r.git("show", sha+":"+path)
+	if err != nil {
+		return 0, err
+	}
+	if content == "" {
+		return 0, nil
+	}
+	count := strings.Count(content, "\n")
+	if !strings.HasSuffix(content, "\n") {
+		count++
+	}
+	return count, nil
 }
 
 // TargetChanged reports whether a moving target ref no longer matches recorded evidence.

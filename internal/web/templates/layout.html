@@ -12,19 +12,29 @@
     <script type="module" src="/assets/application.js" data-turbo-track="reload"></script>
   </head>
   <body>
-    <header class="site-header">
-      <a href="/" class="brand"><span class="brand-mark">P</span><span>Patchflow</span></a>
+    <header class="site-header"{{if .BackPath}} data-controller="navigation" data-navigation-fallback-value="{{.BackPath}}"{{end}}>
+      <div class="site-navigation-start">
+        {{if .BackPath}}<button type="button" class="site-back" data-action="navigation#back" aria-label="Back to {{.BackLabel}}" title="Back to {{.BackLabel}} (Alt+Left)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 10H3.5M8.5 5l-5 5 5 5"/></svg></button>{{end}}
+        <a href="/" class="brand"><span class="brand-mark">P</span><span>Patchflow</span></a>
+      </div>
       {{if .RepositoryName}}
         <nav class="site-context" aria-label="Repository navigation">
+          <a href="/" class="site-action site-action--workspace" aria-label="All repositories" title="All repositories"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4h5v5H3zM12 4h5v5h-5zM3 13h5v4H3zM12 13h5v4h-5z"/></svg><span>All repositories</span></a>
+          <a href="{{.BasePath}}" class="repository-chip" title="Repository overview">{{.RepositoryName}}</a>
+          {{if .ReviewHomePath}}<a href="{{.ReviewHomePath}}" class="site-action" aria-label="Review overview" title="Review overview"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12v13H4zM7 7h6M7 10h6M7 13h4"/></svg></a>{{end}}
+          {{if .NewReviewPath}}<a href="{{.NewReviewPath}}" class="site-action" aria-label="Create new review" title="Create new review"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg></a>{{end}}
           {{if .GitHub}}<a href="{{.GitHub.URL}}" class="github-link" target="_blank" rel="noopener noreferrer" aria-label="{{.GitHub.Label}}" title="{{.GitHub.Label}}"><svg viewBox="0 0 16 16" role="img" aria-hidden="true"><path d="M8 0C3.58 0 0 3.64 0 8.13c0 3.59 2.29 6.64 5.47 7.71.4.08.55-.18.55-.39 0-.19-.01-.83-.01-1.5-2.01.38-2.53-.5-2.69-.96-.09-.23-.48-.96-.82-1.15-.28-.15-.68-.53-.01-.54.63-.01 1.08.59 1.23.83.72 1.23 1.87.88 2.33.67.07-.53.28-.88.51-1.08-1.78-.21-3.64-.91-3.64-4.02 0-.89.31-1.62.82-2.19-.08-.2-.36-1.04.08-2.16 0 0 .67-.22 2.2.84A7.5 7.5 0 0 1 8 3.98c.68 0 1.36.09 2 .28 1.53-1.06 2.2-.84 2.2-.84.44 1.12.16 1.96.08 2.16.51.57.82 1.3.82 2.19 0 3.12-1.87 3.81-3.65 4.02.29.25.54.74.54 1.5 0 1.08-.01 1.95-.01 2.22 0 .22.15.47.55.39A8.01 8.01 0 0 0 16 8.13C16 3.64 12.42 0 8 0Z"/></svg></a>{{end}}
-          <a href="/" class="repository-overview-link">All repositories</a>
-          <a href="{{.BasePath}}" class="repository-chip">{{.RepositoryName}}</a>
         </nav>
       {{end}}
     </header>
     <main class="page-shell">
       {{if .Notice}}<div class="flash">{{.Notice}}</div>{{end}}
       {{if .Alert}}<div class="flash flash--alert">{{.Alert}}</div>{{end}}
+      {{if .ReviewNavigation}}<nav class="review-tabs" aria-label="Review views" data-controller="review-tabs" data-review-tabs-memory-key-value="{{.ReviewNavigation.MemoryKey}}" data-review-tabs-view-value="{{.ReviewNavigation.ActiveView}}" data-review-tabs-review-path-value="{{.ReviewNavigation.ReviewPath}}">
+        <a href="{{.ReviewNavigation.PlanPath}}" class="review-tab{{if eq .ReviewNavigation.ActiveView "plan"}} is-active{{end}}"{{if eq .ReviewNavigation.ActiveView "plan"}} aria-current="page"{{end}} data-action="review-tabs#switchView" data-review-tabs-view-param="plan" data-preserve-diff-mode><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3.5h12M4 8h12M4 12.5h8M4 17h6"/></svg><span>Review plan</span></a>
+        <a href="{{.ReviewNavigation.FilesPath}}" class="review-tab{{if eq .ReviewNavigation.ActiveView "files"}} is-active{{end}}"{{if eq .ReviewNavigation.ActiveView "files"}} aria-current="page"{{end}} data-action="review-tabs#switchView" data-review-tabs-view-param="files" data-preserve-diff-mode><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.5h5l1.5 2h8.5v9h-15zM2.5 5.5v-2h5l1.5 2"/></svg><span>Files changed</span><span class="review-tab__count">{{.ReviewNavigation.FileCount}}</span></a>
+        <a href="{{.ReviewNavigation.DiscussionsPath}}" class="review-tab{{if eq .ReviewNavigation.ActiveView "discussions"}} is-active{{end}}"{{if eq .ReviewNavigation.ActiveView "discussions"}} aria-current="page"{{end}} data-action="review-tabs#switchView" data-review-tabs-view-param="discussions"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M17 9.5a6.5 6.5 0 0 1-6.5 6.5H6l-3.5 1.5 1.2-3A7 7 0 1 1 17 9.5Z"/><path d="M7 8h6M7 11h4"/></svg><span>Discussions</span></a>
+      </nav>{{end}}
       {{template "content" .}}
     </main>
   </body>

@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+
+# Any image with Python 3.12 and PyTorch 2.9 works. The default runs on CPU and
+# NVIDIA GPUs; set TORCH_IMAGE to a rocm/pytorch tag for AMD GPUs.
+ARG TORCH_IMAGE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
+FROM ${TORCH_IMAGE}
+
+ARG QWEN_TTS_VERSION=0.1.1
+
+RUN apt-get update && apt-get install --yes --no-install-recommends sox && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir "numpy==1.26.4" "qwen-tts==${QWEN_TTS_VERSION}"
+
+WORKDIR /app
+COPY speech/design_voice.py /app/design_voice.py
+
+ENV HF_HOME=/models/huggingface \
+    PATCHFLOW_TTS_VOICE_DIR=/models/voice \
+    PATCHFLOW_TTS_DEVICE=cpu \
+    PATCHFLOW_TTS_DTYPE=float32
+
+ENTRYPOINT ["python3", "/app/design_voice.py"]

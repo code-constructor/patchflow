@@ -2,28 +2,46 @@
 package settings
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
 
 const currentVersion = 1
 
+// RepositoryKey returns the stable opaque URL identifier for one canonical path.
+func RepositoryKey(repositoryPath string) string {
+	digest := sha256.Sum256([]byte(filepath.Clean(repositoryPath)))
+	return fmt.Sprintf("%x", digest[:8])
+}
+
 // Config is the versioned, extensible user configuration stored on disk.
 type Config struct {
-	Version      int          `json:"version"`
-	Repositories []Repository `json:"repositories"`
+	Version        int              `json:"version"`
+	Repositories   []Repository     `json:"repositories"`
+	ReviewProgress []ReviewProgress `json:"review_progress,omitempty"`
 }
 
 // Repository remembers one local repository and when it was last opened.
 type Repository struct {
 	Path         string    `json:"path"`
 	LastOpenedAt time.Time `json:"last_opened_at"`
+}
+
+// ReviewProgress stores one user's viewed files for an immutable comparison.
+type ReviewProgress struct {
+	RepositoryPath string   `json:"repository_path"`
+	ReviewID       string   `json:"review_id"`
+	TargetSHA      string   `json:"target_sha"`
+	ViewedFiles    []string `json:"viewed_files"`
 }
 
 // Store serializes access to one atomically replaced settings file.
@@ -126,6 +144,86 @@ func (s *Store) Forget(path string) error {
 	return s.write(config)
 }
 
+// ViewedFiles returns the viewed paths for one repository review and target commit.
+func (s *Store) ViewedFiles(repositoryPath, reviewID, targetSHA string) (map[string]bool, error) {
+	absolute, err := filepath.Abs(repositoryPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve repository path: %w", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	config, err := s.read()
+	if err != nil {
+		return nil, err
+	}
+	viewed := map[string]bool{}
+	for _, progress := range config.ReviewProgress {
+		if filepath.Clean(progress.RepositoryPath) != filepath.Clean(absolute) || progress.ReviewID != reviewID || progress.TargetSHA != targetSHA {
+			continue
+		}
+		for _, file := range progress.ViewedFiles {
+			viewed[file] = true
+		}
+		break
+	}
+	return viewed, nil
+}
+
+// SetFileViewed records or clears one viewed path without changing the review artifact.
+func (s *Store) SetFileViewed(repositoryPath, reviewID, targetSHA, filePath string, viewed bool) error {
+	absolute, err := filepath.Abs(repositoryPath)
+	if err != nil {
+		return fmt.Errorf("resolve repository path: %w", err)
+	}
+	if reviewID == "" || targetSHA == "" || filePath == "" || path.IsAbs(filePath) || path.Clean(filePath) != filePath || strings.Contains("/"+filePath+"/", "/../") {
+		return errors.New("invalid review progress identity")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	config, err := s.read()
+	if err != nil {
+		return err
+	}
+	repositoryPath = filepath.Clean(absolute)
+	files := map[string]bool{}
+	progressIndex := -1
+	progresses := config.ReviewProgress[:0]
+	for _, progress := range config.ReviewProgress {
+		if filepath.Clean(progress.RepositoryPath) == repositoryPath && progress.ReviewID == reviewID {
+			if progress.TargetSHA == targetSHA && progressIndex < 0 {
+				progressIndex = len(progresses)
+				for _, existing := range progress.ViewedFiles {
+					files[existing] = true
+				}
+				progresses = append(progresses, progress)
+			}
+			continue
+		}
+		progresses = append(progresses, progress)
+	}
+	if viewed {
+		files[filePath] = true
+	} else {
+		delete(files, filePath)
+	}
+	viewedFiles := make([]string, 0, len(files))
+	for existing := range files {
+		viewedFiles = append(viewedFiles, existing)
+	}
+	sort.Strings(viewedFiles)
+	if len(viewedFiles) == 0 {
+		if progressIndex >= 0 {
+			progresses = append(progresses[:progressIndex], progresses[progressIndex+1:]...)
+		}
+	} else if progressIndex >= 0 {
+		progresses[progressIndex].ViewedFiles = viewedFiles
+	} else {
+		progresses = append(progresses, ReviewProgress{RepositoryPath: repositoryPath, ReviewID: reviewID, TargetSHA: targetSHA, ViewedFiles: viewedFiles})
+	}
+	config.ReviewProgress = progresses
+	return s.write(config)
+}
+
 // read loads and validates the current settings document or returns empty defaults.
 func (s *Store) read() (Config, error) {
 	content, err := os.ReadFile(s.path)
@@ -144,6 +242,9 @@ func (s *Store) read() (Config, error) {
 	}
 	if config.Repositories == nil {
 		config.Repositories = []Repository{}
+	}
+	if config.ReviewProgress == nil {
+		config.ReviewProgress = []ReviewProgress{}
 	}
 	return config, nil
 }

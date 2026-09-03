@@ -6,6 +6,7 @@
 
 # Ignore all environment files.
 /.env*
+!/.env.example
 /compose.override.yaml
 
 # Local binaries and test output.

@@ -18,6 +18,23 @@ later.
 > Patchflow is in early development. The first local end-to-end review workflow
 > is available, but its artifact schema and user experience are still evolving.
 
+## Screenshots
+
+The review overview states the purpose, decision, evidence, and reading path
+before any code is shown:
+
+![Review overview with contract and ordered reading path](docs/screenshots/review-overview.png)
+
+Each review step is a chapter that combines prose, review questions, and
+syntax-highlighted split or unified diffs bound to immutable commits:
+
+![Review chapter with a review question and split diff](docs/screenshots/review-chapter.png)
+
+The classic **Files changed** view keeps a collapsible change tree beside one
+continuous, lazily loaded diff stream:
+
+![Files changed view with change tree and split diff](docs/screenshots/files-changed.png)
+
 ## Why Patchflow?
 
 Large changes are rarely easiest to understand alphabetically or in raw Git
@@ -36,7 +53,7 @@ critiqued.
 2. Resolve and record the exact base and target commit SHAs.
 3. Let an agent explain the change and propose an ordered review plan.
 4. Read an agent-composed chapter built from prose, code, diff, callout,
-   question, diagram, and takeaway blocks.
+   question, diagram, image, and takeaway blocks.
 5. Link directly to a stable block ID and carry syntax-highlighted split or
    unified diff state in the URL.
 6. Discuss a whole block or selected source lines with humans and Coding Agents.
@@ -63,7 +80,8 @@ The repository-local convention is:
 schema version, immutable source refs, change summary, ordered review steps,
 priority rationales, narrative blocks, and review status. Markdown and Mermaid
 source remain part of the artifact instead of existing only as rendered UI
-state. `comments.yaml` is a separately versioned source of truth for block and
+state. Raster screenshots and other visual evidence live below `assets/` and
+render as responsive, fullscreen-capable image blocks. `comments.yaml` is a separately versioned source of truth for block and
 immutable source-range threads, including human and agent replies. It is created
 lazily when the first comment is saved. V1 review artifacts remain readable.
 
@@ -104,6 +122,31 @@ discussion through targeted Turbo Streams. Open popovers, the surrounding
 chapter, and the reader's scroll position remain in place, while the submitting
 control exposes a compact loading state.
 
+Narrative prose, callouts, review questions, takeaways, and image captions have
+a read-aloud control with loading, pause, resume, stop, and inline failure
+states. Patchflow sends the bounded text through its same-origin Go endpoint to
+an explicitly configured local neural speech process; framed PCM travels to the
+browser as soon as each model chunk exists. It does not depend on browser or
+operating-system voices. See the
+[text-to-speech design note](docs/text-to-speech.md) for configuration and the
+local-first privacy boundary. Diffs initially keep Git's compact context.
+When more surrounding source exists, controls above and below the patch load it
+in repeatable 100-line batches inside the current Turbo Frame.
+
+Repository review lists separate current evidence from collapsed stale
+history. `Draft` remains the lifecycle status of an unfinished review; `Stale`
+means its target ref no longer resolves to the recorded target commit. The
+newest non-stale review is highlighted first. Stale entries remain available
+as immutable history and show their unresolved-thread count.
+
+Comments are never copied automatically into a replacement review. Each
+`comments.yaml` remains beside its original `review.yaml`, and code threads are
+anchored to that review's immutable commit SHA and block IDs. Automatic copying
+would make old line anchors appear valid against different source. Unresolved
+threads therefore remain visible on stale history; carrying one forward must be
+an explicit re-anchoring into a new thread with a new ID while preserving the
+old conversation as evidence.
+
 Generated `.patchflow` artifacts are excluded from the diff under review by
 default, preventing Patchflow from reviewing its own output.
 
@@ -117,12 +160,17 @@ The initial vertical slice focuses on:
 - framing chapters with review questions, attention labels, decision gates, and
   addressable chapter takeaways;
 - displaying syntax-highlighted split and unified diffs in the planned order;
+- streaming every changed file down one continuous, tree-addressable page and
+  lazy-loading its diff near the viewport, with a collapsible file tree for
+  full-width code review;
+- persisting personal Viewed progress in the local user configuration, with
+  collapsed viewed files in Files changed and non-collapsing status in the plan;
 - collapsing generated or mechanical evidence without removing it from scope;
-- rendering Markdown and Mermaid diagrams.
+- rendering Markdown, Mermaid diagrams, and safe raster image blocks;
 - persisting addressable block and code-range discussions with replies.
 
-Large-diff virtualization, GitHub pull-request import, specialized notebook or
-image viewers, and extensive keyboard navigation are deliberately deferred
+Large-diff virtualization beyond viewport loading, GitHub pull-request import,
+specialized notebook viewers, and extensive keyboard navigation are deliberately deferred
 until the core workflow is useful. Oversized files currently receive a visible
 placeholder so they do not block the rest of a review step.
 
@@ -157,69 +205,77 @@ bin/dev
 
 The development server is available at <http://localhost:3000> by default.
 
-### Docker and the local development proxy
+### Configuration
 
-Docker is an optional development path. When the shared `dev-proxy` Traefik
-network is available, start Patchflow with:
+Patchflow needs no configuration to start. Every machine-specific value has a
+flag and an environment variable so nothing has to be edited in the source:
+
+| Setting | Flag | Environment variable | Default |
+| --- | --- | --- | --- |
+| Listen address | `--addr` | `PATCHFLOW_ADDR` | `127.0.0.1:3000` |
+| Preselected repository | `--repository` | `PATCHFLOW_REPOSITORY` (via `bin/dev`) | none |
+| Settings file | `--config` | `PATCHFLOW_CONFIG_PATH` (Docker) | `$XDG_CONFIG_HOME/patchflow/config.json` |
+| Repository picker root | `--browse-root` | `PATCHFLOW_BROWSE_ROOT` | discovered, see below |
+| Local speech provider | `--tts-url` | `PATCHFLOW_TTS_URL` | none, speech controls hidden |
+| Speech voice name | `--tts-voice` | `PATCHFLOW_TTS_VOICE` | provider default |
+
+The **Browse…** button opens a server-side repository picker that cannot leave
+its root. Without an explicit root, Patchflow uses the parent directory of the
+preselected repository, then `/workspace` or `~/Projects` when one of them
+exists, and finally the current working directory. Set `--browse-root` to any
+absolute directory to make a different tree browsable.
+
+### Docker
+
+Docker is an optional path that runs the same binary with a mounted workspace.
+Copy `.env.example` to `.env` to adjust host paths, the published port, the
+container user, or the optional speech stack; every variable has a default.
 
 ```sh
-dev-proxy up
+cp .env.example .env    # optional
 docker compose up --build
 ```
 
-Patchflow is then available at <http://patchflow.localhost>. No host port is
-claimed by the application container; Traefik discovers it from Compose labels.
+Patchflow is then available at <http://127.0.0.1:3000>. The directory named by
+`PATCHFLOW_PROJECTS_PATH` (default `$HOME/Projects`) is mounted at `/workspace`
+and is the picker root. Linked Git worktrees store absolute host paths in their
+`.git` metadata, so the same directory is mirrored at its original host path
+inside the container as well.
 
-The host's `$HOME/Projects` directory is mounted at `/workspace`, allowing
-Patchflow to review local projects. Herdr worktrees from `$HOME/.herdr/worktrees`
-are mounted at `/workspace/worktrees` as well. Override that source when needed:
-
-```sh
-PATCHFLOW_WORKTREES_PATH=/another/worktree/root docker compose up --build
-```
-
-Any number of additional repository roots can be mounted beneath `/workspace`.
-Copy `compose.mounts.example.yaml` to the Git-ignored `compose.override.yaml`,
-then add one named target per host directory:
+Additional repository roots, a reverse proxy such as Traefik instead of a
+published port, and GPU access for voice design live in the Git-ignored
+`compose.override.yaml`. Copy `compose.override.example.yaml` and keep the
+sections you need; every additional root should follow the same two-mount
+pattern:
 
 ```yaml
 services:
   app:
     volumes:
-      - /host/client-projects:/workspace/client-projects
-      - /host/other-worktrees:/workspace/other-worktrees
-      # Required when linked-worktree metadata points at these host paths:
-      - /host/client-projects:/host/client-projects
-      - /host/other-worktrees:/host/other-worktrees
+      - /host/worktrees:/workspace/worktrees
+      - /host/worktrees:/host/worktrees
 ```
 
-For example, `$HOME/Projects/example` is selected as `/workspace/example`, while
-a Herdr worktree appears below `/workspace/worktrees`.
-Linked Git worktrees store absolute paths in their `.git` metadata. The default
-Compose setup therefore mirrors both standard roots at their original host
-paths inside the container as well. Additional worktree mounts should follow
-the same two-mount pattern shown above.
+The Compose setup mounts the host's XDG Git configuration read-only so comment
+forms can use `git config user.name`. If your global Git configuration lives
+elsewhere, set `PATCHFLOW_GIT_CONFIG_PATH` (for example `$HOME/.gitconfig`).
 
-The Compose setup also mounts the host's XDG Git configuration read-only so
-comment forms can use `git config user.name`. If your global Git configuration
-lives elsewhere, point Patchflow at it explicitly:
+The container also exports the server's config path to CLI subprocesses. A
+Coding Agent can therefore create and register a review without opening the
+repository picker or assembling SHAs, for example:
 
 ```sh
-PATCHFLOW_GIT_CONFIG_PATH="$HOME/.gitconfig" docker compose up --build
+docker compose exec -w /workspace/example app \
+  patchflow create --format json
 ```
-
-The **Browse…** button opens a server-side repository picker rooted at
-`/workspace`, so container paths do not need to be entered by hand. In local
-development the picker starts beside the preselected repository or in the
-user's `Projects` directory.
 
 Each opened repository receives a short URL namespace such as
 `/repositories/4a1f…/reviews/<review-id>`. The absolute local path remains in a
 versioned user configuration rather than the URL or browser session. Native
 execution uses `$XDG_CONFIG_HOME/patchflow/config.json` (normally
-`~/.config/patchflow/config.json`). The Docker development setup uses
-`/workspace/.patchflow/config.json`, persisted on the host as
-`$HOME/Projects/.patchflow/config.json`; override the container path with
+`~/.config/patchflow/config.json`). The Docker setup uses
+`/workspace/.patchflow/config.json`, persisted on the host inside the mounted
+projects directory; override the container path with
 `PATCHFLOW_DOCKER_CONFIG_PATH` when required.
 
 Tabs and even separate browsers can therefore keep reviews from different
@@ -243,14 +299,16 @@ extensible for future preferences:
       "path": "/workspace/example",
       "last_opened_at": "2026-08-19T12:00:00Z"
     }
+  ],
+  "review_progress": [
+    {
+      "repository_path": "/workspace/example",
+      "review_id": "20260819-120000-deadbeef",
+      "target_sha": "0123456789abcdef0123456789abcdef01234567",
+      "viewed_files": ["cmd/patchflow/main.go"]
+    }
   ]
 }
-```
-
-An explicit path is also available outside Docker:
-
-```sh
-patchflow serve --config /path/to/config.json
 ```
 
 The image runs as UID and GID `1000` by default so review artifacts remain owned
@@ -260,31 +318,73 @@ by the developer. Override these values on systems with different IDs:
 PATCHFLOW_UID="$(id -u)" PATCHFLOW_GID="$(id -g)" docker compose up --build
 ```
 
-Use `DEV_DOMAIN` to select another `*.localhost` hostname. This Docker workflow
-is a convenience; Patchflow itself requires only its compiled binary and Git.
+### Optional local speech
+
+The read-aloud controls need a local speech provider. The Compose profile
+`speech` builds one from Qwen3-TTS VoiceDesign (creates an original assistant
+voice once) and Chatterbox Turbo (streams the speech). Enable it in `.env`:
+
+```sh
+COMPOSE_PROFILES=speech
+PATCHFLOW_TTS_URL=http://speech:5000
+```
+
+Models and the generated reference voice live in the `patchflow-speech-models`
+Docker volume, so the first start downloads several gigabytes and is
+substantially slower. Voice design runs on the CPU by default; attach an NVIDIA
+or AMD GPU through `compose.override.example.yaml` and, for AMD, point
+`PATCHFLOW_TORCH_IMAGE` at a `rocm/pytorch` tag. Streaming synthesis runs on the
+CPU. The speech service is reachable only from the Compose network; the browser
+talks to Patchflow, never directly to the synthesis service. See the
+[text-to-speech design note](docs/text-to-speech.md) for details.
 
 ## Try the review workflow
 
 Open Patchflow, select a local Git repository, and create a review from a base
 ref such as `main` to a committed target such as `HEAD`. Patchflow resolves the
 merge base and target SHA, creates a baseline review plan, and writes the result
-to the selected repository.
+to the selected repository. Within a review, the global **Review plan** and
+**Files changed** tabs switch between the guided narrative and a classic file
+tree backed by the same immutable commits. Files form one continuous page;
+their Turbo Frames load near the viewport, and selecting a tree path scrolls to
+its stable URL without throwing away the surrounding page. Turbo navigation
+remembers the last resource and scroll position independently for both views in
+the current browser tab. A Viewed toggle collapses that file in the classic
+view while the guided plan keeps its code visible and shows only the shared
+completion state. The state survives browsers and restarts in the local config.
 
-The same workflow is available from the command line:
+The same workflow is available from the command line. Run it inside the target
+repository and Patchflow detects the local default branch, uses `HEAD` as the
+target, resolves both immutable commits, creates a baseline artifact, validates
+its Git evidence, and remembers the repository for the local UI:
 
 ```sh
-bin/patchflow create \
-  --repository /absolute/path/to/repository \
-  --base main \
-  --target HEAD
+bin/patchflow create --format json
 ```
 
-Validate an existing artifact with:
+Use `--repository`, `--base`, or `--target` when the command runs outside the
+reviewed worktree or automatic base discovery is not the intended comparison.
+`--config` selects the same settings file as a separately running Patchflow
+server. Successful JSON output includes the artifact path, browser route,
+repository path, refs, and full base/target SHAs. Failures return a non-zero
+status and an `errors` array intended for Coding Agents.
+
+After an agent curates `review.yaml`, validate the complete stored review with:
 
 ```sh
 bin/patchflow validate \
+  --format json \
   /absolute/path/to/repository/.patchflow/reviews/<review-id>/review.yaml
 ```
+
+Validation is repository-backed, not only syntactic. It checks the schema and
+semantic IDs, proves that both recorded SHAs are available commits, compares
+the complete changed-file inventory with Git, verifies code-block paths and
+line ranges, and confirms that `overview.md`, Mermaid sources, and raster image
+assets are readable. The repository is inferred from the canonical
+`.patchflow/reviews` path; `--repository PATH` is available for explicit
+diagnostics. A review outside that canonical directory is rejected because the
+UI could not discover it.
 
 The standalone discussion contract is validated the same way:
 
@@ -318,7 +418,8 @@ selected:
 bin/patchflow serve --repository /absolute/path/to/repository
 ```
 
-The server listens on <http://127.0.0.1:3000>. Build the self-contained binary
+The server listens on <http://127.0.0.1:3000> unless `--addr` or
+`PATCHFLOW_ADDR` says otherwise. Build the self-contained binary
 with `go build -o patchflow ./cmd/patchflow`; it contains the templates, CSS,
 JavaScript modules, schema, and vendored browser libraries.
 
@@ -348,7 +449,7 @@ bin/docs
 ```
 
 Pass an import path to inspect one package, for example
-`bin/docs github.com/traqx-ai/patchflow/internal/gitrepo`. The CI pipeline checks
+`bin/docs github.com/code-constructor/patchflow/internal/gitrepo`. The CI pipeline checks
 both the documentation convention and the documentation command, so new
 undocumented functions cannot enter unnoticed.
 
@@ -364,3 +465,10 @@ undocumented functions cannot enter unnoticed.
   selected repository.
 - **Monorepo:** the Go application, embedded frontend, schemas, fixtures, docs,
   and agent skills evolve in the same repository.
+
+## License
+
+Patchflow is released under the [MIT License](LICENSE). Vendored browser
+libraries under `internal/web/assets/vendor/` keep their own licenses
+(Diff2Html, marked, Stimulus, Turbo, and Mermaid under MIT; DOMPurify under
+Apache 2.0 / MPL 2.0).

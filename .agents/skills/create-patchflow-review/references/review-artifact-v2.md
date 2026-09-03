@@ -30,7 +30,7 @@ steps:
     title: <short chapter title>
     priority: critical | high | medium | low
     rationale: <why this chapter belongs at this position>
-    review_question: <optional decision or behavior the reviewer should verify>
+    review_question: <optional verification focus; never an unresolved development decision>
     attention: # optional, unique values
       - design | behavior | data | security | reliability | performance | ux | operations | verification | documentation | mechanical
     files:
@@ -65,11 +65,17 @@ steps:
         type: diagram
         path: diagrams/<name>.mmd
       - id: <globally unique block-id>
+        type: image
+        path: assets/<name>.png # PNG, JPEG, GIF, or WebP
+        alt: <accessible description of the image>
+        caption: <optional Markdown explaining what to inspect>
+      - id: <globally unique block-id>
         type: takeaway
         body: <understanding the reviewer should leave with>
 ```
 
-Create `overview.md` beside `review.yaml`. Put Mermaid files below `diagrams/`.
+Create `overview.md` beside `review.yaml`. Put Mermaid files below `diagrams/`
+and raster review images below `assets/`.
 The v2 narrative has no `annotations`, replies, or `decisions` fields. Persisted
 discussion uses the separate `comments.yaml` contract; never add its fields to
 `review.yaml`.
@@ -87,17 +93,30 @@ Apply these invariants:
 - Include at least one changed file, one review step, and one block per step.
   Use each changed path once in `change.files`; reference only changed paths
   from step file lists and diff blocks; cover every changed path in at least one
-  step.
+  step. Step-file coverage is inventory metadata: a changed path does not need
+  a visible `code` or `diff` block when it does not advance the review journey.
 - Code blocks may reference unchanged files when necessary for context.
 - Use normalized relative paths with `/` separators. Reject absolute paths,
   `..`, backslashes, and repository paths below `.patchflow`. Keep diagram paths
-  below the artifact's `diagrams/` directory.
+  below the artifact's `diagrams/` directory and image paths below `assets/`.
+- Images require useful `alt` text and must be PNG, JPEG, GIF, or WebP. Do not
+  use SVG for untrusted review assets.
 - Keep line ranges ordered. Limit code excerpts to 500 lines.
 - Use no unknown fields. Set new reviews to `draft`.
-- Use `review_question` and `attention` when they sharpen a chapter's purpose.
+- Use `review_question` only for review verification, never to defer an unresolved
+  product, architecture, or implementation decision into Patchflow. Prefer a
+  declarative rationale for decisions already made. Use `attention` when it
+  sharpens a chapter's purpose.
   Use a final `takeaway` block when a specific mental model should close the
   chapter. Collapse only evidence whose initial expansion would spend attention
   without improving the reviewer's first-pass understanding.
+- When visible evidence omits changed paths, end with a compact
+  scope-and-coverage step. Assign every omitted path to that step's `files`
+  metadata and name it in the narrative with a concrete reason. Do not add an
+  empty coverage step when visible evidence already covers every changed path.
 
 The Patchflow application's `bin/patchflow validate --format json` command is
-authoritative when available. Fix every error before handing off.
+authoritative when available. It checks both the artifact contract and the
+stored repository evidence: available commits, exact changed-file inventory,
+readable code ranges, overview, diagrams, and images. Fix every returned error
+before handing off.

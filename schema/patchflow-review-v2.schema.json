@@ -142,6 +142,7 @@
               { "$ref": "#/$defs/callout_block" },
               { "$ref": "#/$defs/question_block" },
               { "$ref": "#/$defs/diagram_block" },
+              { "$ref": "#/$defs/image_block" },
               { "$ref": "#/$defs/takeaway_block" }
             ]
           }
@@ -233,6 +234,18 @@
         "id": { "$ref": "#/$defs/id" },
         "type": { "const": "diagram" },
         "path": { "$ref": "#/$defs/path" }
+      }
+    },
+    "image_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "path", "alt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "const": "image" },
+        "path": { "$ref": "#/$defs/path" },
+        "alt": { "$ref": "#/$defs/text" },
+        "caption": { "$ref": "#/$defs/text" }
       }
     }
   }

@@ -1,6 +1,8 @@
 package web
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
@@ -10,9 +12,61 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	patchreview "github.com/traqx-ai/patchflow/internal/review"
+	"github.com/code-constructor/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/gitrepo"
+	patchreview "github.com/code-constructor/patchflow/internal/review"
+	patchspeech "github.com/code-constructor/patchflow/internal/speech"
+	yaml "go.yaml.in/yaml/v3"
 )
+
+// TestReviewDashboardSeparatesCurrentAndStaleEvidence keeps the next review obvious without hiding old discussion.
+func TestReviewDashboardSeparatesCurrentAndStaleEvidence(t *testing.T) {
+	repositoryPath := featureRepository(t)
+	repository, err := gitrepo.Open(repositoryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldReview, err := (&patchreview.Creator{Repository: repository, Store: store, Now: func() time.Time {
+		return time.Date(2026, 8, 19, 8, 0, 0, 0, time.UTC)
+	}}).Create("main", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	openingBlock := oldReview.Review.Steps[0].Blocks[0]
+	if _, err := (&patchreview.DiscussionService{Store: store}).CreateThread(oldReview.Review.ID, patchreview.NewThread{
+		BlockID: openingBlock.ID, TargetType: "block", Author: "Reviewer", AuthorKind: "human", Body: "Carry this concern forward deliberately.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	write(t, repositoryPath, "app/models/account.rb", "class Account\n  def locked? = true\n  def active? = true\nend\n")
+	git(t, repositoryPath, "add", "app/models/account.rb")
+	git(t, repositoryPath, "commit", "-m", "Advance target")
+	currentReview, err := (&patchreview.Creator{Repository: repository, Store: store, Now: func() time.Time {
+		return time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
+	}}).Create("main", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := newTestApp(t, repositoryPath)
+	response := perform(app, http.MethodGet, repositoryBasePath(repository), "")
+	body := response.Body.String()
+	for _, expected := range []string{"Current reviews", "Latest", "Draft describes review progress", "Stale review history", "1 unresolved thread", "Immutable evidence for older commits"} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("review dashboard missing %q", expected)
+		}
+	}
+	currentPosition := strings.Index(body, "/reviews/"+currentReview.Review.ID)
+	stalePosition := strings.Index(body, "/reviews/"+oldReview.Review.ID)
+	if currentPosition < 0 || stalePosition < 0 || currentPosition >= stalePosition {
+		t.Fatalf("current review was not placed before stale evidence: current=%d stale=%d", currentPosition, stalePosition)
+	}
+}
 
 // TestAppRunsRepositoryToChapterFlow exercises repository selection through chapter rendering.
 func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
@@ -33,14 +87,15 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	if !strings.HasPrefix(reviewPath, "/repositories/") || !strings.Contains(reviewPath, "/reviews/") {
 		t.Fatalf("unexpected redirect %q", location)
 	}
+	basePath := strings.Split(reviewPath, "/reviews/")[0]
 
 	overview := perform(app, http.MethodGet, reviewPath, "")
-	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/steps/domain\"") || !strings.Contains(overview.Body.String(), "href=\"https://github.com/traqx-ai/patchflow\"") || !strings.Contains(overview.Body.String(), "aria-label=\"Open repository on GitHub\"") {
+	if overview.Code != http.StatusOK || !strings.Contains(overview.Body.String(), "Review plan") || !strings.Contains(overview.Body.String(), "Understand domain behavior") || !strings.Contains(overview.Body.String(), "attention--behavior") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/steps/domain\"") || !strings.Contains(overview.Body.String(), "href=\"https://github.com/code-constructor/patchflow\"") || !strings.Contains(overview.Body.String(), "aria-label=\"Open repository on GitHub\"") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/files/app/controllers/sessions_controller.rb\"") || !strings.Contains(overview.Body.String(), "href=\""+reviewPath+"/discussions\"") || !strings.Contains(overview.Body.String(), "data-review-tabs-view-value=\"plan\"") || !strings.Contains(overview.Body.String(), "data-navigation-fallback-value=\""+basePath+"\"") || !strings.Contains(overview.Body.String(), "data-action=\"navigation#back\"") || !strings.Contains(overview.Body.String(), "data-controller=\"speech\"") || !strings.Contains(overview.Body.String(), "data-speech-target=\"content\"") {
 		t.Fatalf("unexpected overview: %d %s", overview.Code, overview.Body.String())
 	}
 
 	chapter := perform(app, http.MethodGet, reviewPath+"/steps/domain", "")
-	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\"", "id=\"domain-intro\"", "id=\"review-block-domain-intro\"", "class=\"review-block-frame\"", "type=\"button\"", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-intro\"", "aria-label=\"Copy path for block domain-intro\"", "data-controller=\"chapter-navigation\"", "Review question", "Does the domain behavior", "Chapter takeaway", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-takeaway\"", "href=\"/\" class=\"repository-overview-link\"", "href=\"https://github.com/traqx-ai/patchflow\""} {
+	for _, expected := range []string{"Domain models and services", "data-controller=\"diff-viewer\"", "app/models/account.rb", "data-diff-viewer-initial-value=\"split\"", "id=\"domain-intro\"", "id=\"review-block-domain-intro\"", "class=\"review-block-frame\"", "type=\"button\"", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-intro\"", "aria-label=\"Copy path for block domain-intro\"", "data-controller=\"chapter-navigation\"", "data-controller=\"comment-thread speech\"", "data-speech-target=\"content\"", "data-action=\"speech#toggle\"", "data-action=\"speech#stop\"", "aria-label=\"Read this block aloud\"", "Review question", "Does the domain behavior", "Chapter takeaway", "data-block-reference-path-value=\"" + reviewPath + "/blocks/domain-takeaway\"", "class=\"site-action site-action--workspace\"", "href=\"" + reviewPath + "\" class=\"site-action\" aria-label=\"Review overview\"", "data-navigation-fallback-value=\"" + reviewPath + "\"", "href=\"https://github.com/code-constructor/patchflow\"", "class=\"chapter-step-nav\"", "href=\"" + reviewPath + "/steps/security\" rel=\"prev\"", "aria-label=\"Previous step: Inspect security-sensitive behavior\"", "href=\"" + reviewPath + "/steps/tests\" rel=\"next\"", "aria-label=\"Next step: Verify the intended behavior\""} {
 		if !strings.Contains(chapter.Body.String(), expected) {
 			t.Errorf("chapter missing %q", expected)
 		}
@@ -56,8 +111,44 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	if !strings.Contains(chapter.Body.String(), "data-turbo-stream") || !strings.Contains(chapter.Body.String(), "data-turbo-submits-with=\"Saving…\"") {
 		t.Error("comment forms must request inline streams and expose their loading state")
 	}
+	emptyDiscussions := perform(app, http.MethodGet, reviewPath+"/discussions", "")
+	if emptyDiscussions.Code != http.StatusOK || !strings.Contains(emptyDiscussions.Body.String(), "data-review-tabs-view-value=\"discussions\"") || !strings.Contains(emptyDiscussions.Body.String(), "class=\"review-tab is-active\"") || !strings.Contains(emptyDiscussions.Body.String(), "The review has no annotations.") {
+		t.Fatalf("empty discussions view failed: %d %s", emptyDiscussions.Code, emptyDiscussions.Body.String())
+	}
 	if strings.Contains(chapter.Body.String(), "href=\""+reviewPath+"/blocks/domain-intro\"") {
 		t.Error("block copy control must not navigate")
+	}
+
+	fileIndex := perform(app, http.MethodGet, reviewPath+"/files", "")
+	if fileIndex.Code != http.StatusOK || !strings.Contains(fileIndex.Body.String(), "class=\"file-stream\"") || !strings.Contains(fileIndex.Body.String(), "loading=\"lazy\"") || !strings.Contains(fileIndex.Body.String(), "data-action=\"file-review#toggleTree\"") || !strings.Contains(fileIndex.Body.String(), "aria-controls=\"changed-files-tree\"") || !strings.Contains(fileIndex.Body.String(), "app") || !strings.Contains(fileIndex.Body.String(), "vendor") {
+		t.Fatalf("unexpected changed-file index: %d %s", fileIndex.Code, fileIndex.Body.String())
+	}
+	fileURL := reviewPath + "/files/app/models/account.rb?diff=unified"
+	fileView := perform(app, http.MethodGet, fileURL, "")
+	for _, expected := range []string{"data-review-tabs-view-value=\"files\"", "class=\"review-tab is-active\"", "class=\"file-tree__file is-active\"", "title=\"app/models/account.rb\"", "data-controller=\"file-review\"", "id=\"" + fileFrameID("app/models/account.rb") + "\"", "src=\"" + reviewPath + "/files/app/models/account.rb\""} {
+		if !strings.Contains(fileView.Body.String(), expected) {
+			t.Errorf("changed-file view missing %q", expected)
+		}
+	}
+	if fileView.Code != http.StatusOK {
+		t.Fatalf("changed-file view returned %d: %s", fileView.Code, fileView.Body.String())
+	}
+	fileFrame := performFrame(app, fileURL, fileFrameID("app/models/account.rb"))
+	for _, expected := range []string{"file-change-kind file-change-kind--modified\">Modified", "def locked? = true", "data-controller=\"diff-viewer\"", "data-diff-viewer-initial-value=\"split\"", "aria-label=\"Comment on file app/models/account.rb\"", "data-thread-list-for=\"domain-app-models-account-rb", "Load 100 more context lines", "?context=103", "data-preserve-diff-mode", ">Viewed</span>"} {
+		if !strings.Contains(fileFrame.Body.String(), expected) {
+			t.Errorf("changed-file frame missing %q", expected)
+		}
+	}
+	if strings.Count(fileFrame.Body.String(), "class=\"diff-context-control") != 2 {
+		t.Error("changed-file frame must offer context expansion above and below the patch")
+	}
+	expandedFrame := performFrame(app, reviewPath+"/files/app/models/account.rb?context=103", fileFrameID("app/models/account.rb"))
+	if expandedFrame.Code != http.StatusOK || !strings.Contains(expandedFrame.Body.String(), "?context=203") || expandedFrame.Body.Len() <= fileFrame.Body.Len() {
+		t.Fatalf("changed-file context did not advance by one batch: %d", expandedFrame.Code)
+	}
+	missingFile := perform(app, http.MethodGet, reviewPath+"/files/not-changed.go", "")
+	if missingFile.Code != http.StatusNotFound {
+		t.Fatalf("unrecorded changed file returned %d", missingFile.Code)
 	}
 
 	block := perform(app, http.MethodGet, reviewPath+"/blocks/domain-intro?diff=unified", "")
@@ -70,7 +161,7 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	}
 
 	asset := perform(app, http.MethodGet, "/assets/application.js", "")
-	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") || !strings.Contains(asset.Body.String(), "diagram-viewer") || !strings.Contains(asset.Body.String(), "block-reference") || !strings.Contains(asset.Body.String(), "chapter-navigation") || !strings.Contains(asset.Body.String(), "comment-thread") {
+	if asset.Code != http.StatusOK || !strings.Contains(asset.Body.String(), "Application.start") || !strings.Contains(asset.Body.String(), "diagram-viewer") || !strings.Contains(asset.Body.String(), "image-viewer") || !strings.Contains(asset.Body.String(), "block-reference") || !strings.Contains(asset.Body.String(), "chapter-navigation") || !strings.Contains(asset.Body.String(), "comment-thread") || !strings.Contains(asset.Body.String(), "review-tabs") || !strings.Contains(asset.Body.String(), "file-review") || !strings.Contains(asset.Body.String(), "viewed") || !strings.Contains(asset.Body.String(), "navigation") || !strings.Contains(asset.Body.String(), "plan-file-disclosure") || !strings.Contains(asset.Body.String(), "speech") {
 		t.Fatalf("embedded asset unavailable: %d", asset.Code)
 	}
 	blockController := perform(app, http.MethodGet, "/assets/controllers/block_reference_controller.js", "")
@@ -82,11 +173,11 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 		t.Fatalf("chapter navigation does not scroll in place: %d", chapterController.Code)
 	}
 	commentController := perform(app, http.MethodGet, "/assets/controllers/comment_thread_controller.js", "")
-	if commentController.Code != http.StatusOK || !strings.Contains(commentController.Body.String(), "pointermove") || !strings.Contains(commentController.Body.String(), "showPopover") || !strings.Contains(commentController.Body.String(), "cloneNode") || !strings.Contains(commentController.Body.String(), "anchor.start === line") || !strings.Contains(commentController.Body.String(), "openThreadPopover") || !strings.Contains(commentController.Body.String(), "enhanceDiff") {
+	if commentController.Code != http.StatusOK || !strings.Contains(commentController.Body.String(), "pointermove") || !strings.Contains(commentController.Body.String(), "showPopover") || !strings.Contains(commentController.Body.String(), "cloneNode") || !strings.Contains(commentController.Body.String(), "anchor.start === line") || !strings.Contains(commentController.Body.String(), "openThreadPopover") || !strings.Contains(commentController.Body.String(), "enhanceDiff") || !strings.Contains(commentController.Body.String(), "hasComposerTemplateTarget") {
 		t.Fatalf("comment thread controller unavailable: %d", commentController.Code)
 	}
 	documentController := perform(app, http.MethodGet, "/assets/controllers/review_document_controller.js", "")
-	if documentController.Code != http.StatusOK || !strings.Contains(documentController.Body.String(), "link.dataset.turboFrame = \"_top\"") {
+	if documentController.Code != http.StatusOK || !strings.Contains(documentController.Body.String(), "link.dataset.turboFrame = \"_top\"") || !strings.Contains(documentController.Body.String(), "htmlLabels: false") || !strings.Contains(documentController.Body.String(), "diagramSequence++") {
 		t.Fatalf("review prose links are not protected from block-frame navigation: %d", documentController.Code)
 	}
 	diagramController := perform(app, http.MethodGet, "/assets/controllers/diagram_viewer_controller.js", "")
@@ -97,20 +188,121 @@ func TestAppRunsRepositoryToChapterFlow(t *testing.T) {
 	if diffController.Code != http.StatusOK || !strings.Contains(diffController.Body.String(), "searchParams.set(\"diff\"") || strings.Contains(diffController.Body.String(), "localStorage") {
 		t.Fatalf("diff layout is not URL-backed: %d", diffController.Code)
 	}
+	reviewTabsController := perform(app, http.MethodGet, "/assets/controllers/review_tabs_controller.js", "")
+	for _, expected := range []string{"turbo:before-visit", "sessionStorage", "window.scrollTo", "belongsToReview", "event.currentTarget.href"} {
+		if !strings.Contains(reviewTabsController.Body.String(), expected) {
+			t.Errorf("review tabs controller missing %q", expected)
+		}
+	}
+	fileReviewController := perform(app, http.MethodGet, "/assets/controllers/file_review_controller.js", "")
+	for _, expected := range []string{"IntersectionObserver", "history.pushState", "history.replaceState", "scrollIntoView", "patchflow:diff-mode", "is-tree-collapsed", "sessionStorage", "treeStorageKey"} {
+		if !strings.Contains(fileReviewController.Body.String(), expected) {
+			t.Errorf("file review controller missing %q", expected)
+		}
+	}
+	viewedController := perform(app, http.MethodGet, "/assets/controllers/viewed_controller.js", "")
+	if viewedController.Code != http.StatusOK || !strings.Contains(viewedController.Body.String(), "requestSubmit") || !strings.Contains(viewedController.Body.String(), "disclosure.open") || !strings.Contains(viewedController.Body.String(), "patchflow:viewed") {
+		t.Fatalf("viewed controller unavailable: %d", viewedController.Code)
+	}
+	planDisclosureController := perform(app, http.MethodGet, "/assets/controllers/plan_file_disclosure_controller.js", "")
+	if planDisclosureController.Code != http.StatusOK || !strings.Contains(planDisclosureController.Body.String(), "localStorage") || !strings.Contains(planDisclosureController.Body.String(), "patchflow:plan-file:") || !strings.Contains(planDisclosureController.Body.String(), "viewedChanged") {
+		t.Fatalf("plan disclosure controller unavailable: %d", planDisclosureController.Code)
+	}
+	speechController := perform(app, http.MethodGet, "/assets/controllers/speech_controller.js", "")
+	for _, expected := range []string{"fetch(\"/speech\"", "AudioContext", "response.body?.getReader", "schedulePCM", "AbortController", "patchflow:speech-start", "Generating local speech"} {
+		if speechController.Code != http.StatusOK || !strings.Contains(speechController.Body.String(), expected) {
+			t.Errorf("speech controller missing %q", expected)
+		}
+	}
+	for _, browserNativeAPI := range []string{"speechSynthesis", "SpeechSynthesisUtterance"} {
+		if strings.Contains(speechController.Body.String(), browserNativeAPI) {
+			t.Errorf("speech controller still uses browser-native API %q", browserNativeAPI)
+		}
+	}
+	imageController := perform(app, http.MethodGet, "/assets/controllers/image_viewer_controller.js", "")
+	if imageController.Code != http.StatusOK || !strings.Contains(imageController.Body.String(), "showModal") {
+		t.Fatalf("image viewer controller unavailable: %d", imageController.Code)
+	}
+	navigationController := perform(app, http.MethodGet, "/assets/controllers/navigation_controller.js", "")
+	for _, expected := range []string{"sessionStorage", "window.Turbo.visit", "fallbackValue", "ArrowLeft", "window.location.origin"} {
+		if navigationController.Code != http.StatusOK || !strings.Contains(navigationController.Body.String(), expected) {
+			t.Errorf("navigation controller missing %q", expected)
+		}
+	}
 	styles := perform(app, http.MethodGet, "/assets/styles/application.css", "")
-	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", "--color-comment-marker:", ".chapter-rail { position: sticky", ".callout, .review-question, .chapter-takeaway { width: 100%", ".discussion-panel:has(.thread-list:empty)", ".github-link", "comment-submit-spin"} {
+	for _, expected := range []string{"--font-sans:", "--font-mono:", "--chapter-rail-width:", "--color-comment-marker:", "--block-header-sticky-offset:", ".chapter-rail { position: sticky", ".chapter-step-nav", ".code-card__header { position: sticky", "top: var(--block-header-sticky-offset)", ".callout, .review-question, .chapter-takeaway { width: 100%", ".discussion-panel:has(.thread-list:empty)", ".block-speech-action.is-active", ".github-link", ".site-back", ".review-tabs", ".file-browser", "comment-submit-spin"} {
 		if !strings.Contains(styles.Body.String(), expected) {
 			t.Errorf("theme stylesheet missing %q", expected)
 		}
 	}
+	if strings.Contains(styles.Body.String(), ".review-tabs {\n  position: sticky") {
+		t.Error("review view tabs must scroll with the document")
+	}
 
 	securityChapter := perform(app, http.MethodGet, reviewPath+"/steps/security", "")
-	if securityChapter.Code != http.StatusOK || !strings.Contains(securityChapter.Body.String(), "Decision gate") {
+	if securityChapter.Code != http.StatusOK || !strings.Contains(securityChapter.Body.String(), "Decision gate") || !strings.Contains(securityChapter.Body.String(), "aria-disabled=\"true\" title=\"This is the first step\"") {
 		t.Fatalf("critical review question is missing its decision gate: %d", securityChapter.Code)
 	}
 	generatedChapter := perform(app, http.MethodGet, reviewPath+"/steps/generated", "")
 	if generatedChapter.Code != http.StatusOK || !strings.Contains(generatedChapter.Body.String(), "<details class=\"evidence-disclosure\">") {
 		t.Fatalf("mechanical evidence is not collapsed: %d", generatedChapter.Code)
+	}
+	newReview := perform(app, http.MethodGet, basePath+"/reviews/new", "")
+	if newReview.Code != http.StatusOK || !strings.Contains(newReview.Body.String(), "data-navigation-fallback-value=\""+basePath+"\"") || strings.Contains(newReview.Body.String(), "aria-label=\"Create new review\"") {
+		t.Fatalf("new review navigation is not contextual: %d %s", newReview.Code, newReview.Body.String())
+	}
+}
+
+// TestSpeechEndpointReturnsOnlyConfiguredLocalAudio verifies validation, origin checks, and media output.
+func TestSpeechEndpointReturnsOnlyConfiguredLocalAudio(t *testing.T) {
+	repository := featureRepository(t)
+	app := newTestApp(t, repository)
+	response := perform(app, http.MethodPost, "/speech", `{"text":"Explain this boundary."}`)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/vnd.patchflow.pcm-stream" || response.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("unexpected speech response: %d %q %q", response.Code, response.Header().Get("Content-Type"), response.Body.String())
+	}
+	if response.Header().Get("X-Patchflow-Sample-Rate") != "22050" || response.Header().Get("X-Patchflow-Channels") != "1" || response.Header().Get("X-Patchflow-Bits-Per-Sample") != "16" {
+		t.Fatalf("unexpected speech format headers: %#v", response.Header())
+	}
+	if !bytes.Equal(response.Body.Bytes(), []byte{4, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0}) {
+		t.Fatalf("unexpected framed PCM response: %v", response.Body.Bytes())
+	}
+	if !strings.Contains(response.Header().Get("Content-Security-Policy"), "media-src 'self' blob:") {
+		t.Fatalf("speech response does not allow same-origin blob audio: %q", response.Header().Get("Content-Security-Policy"))
+	}
+	invalid := perform(app, http.MethodPost, "/speech", `{"text":""}`)
+	if invalid.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("empty speech returned %d", invalid.Code)
+	}
+	crossOriginRequest := httptest.NewRequest(http.MethodPost, "/speech", strings.NewReader(`{"text":"Do not synthesize me."}`))
+	crossOriginRequest.Header.Set("Origin", "https://attacker.example")
+	crossOriginResponse := httptest.NewRecorder()
+	app.ServeHTTP(crossOriginResponse, crossOriginRequest)
+	if crossOriginResponse.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin speech returned %d", crossOriginResponse.Code)
+	}
+
+	withoutSpeech, err := newApp(repository, filepath.Join(t.TempDir(), "patchflow", "config.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unavailable := perform(withoutSpeech, http.MethodPost, "/speech", `{"text":"No provider."}`)
+	if unavailable.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured speech returned %d", unavailable.Code)
+	}
+	created := perform(withoutSpeech, http.MethodPost, "/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
+	overview := perform(withoutSpeech, http.MethodGet, strings.Split(created.Header().Get("Location"), "?")[0], "")
+	if strings.Contains(overview.Body.String(), "data-action=\"speech#toggle\"") {
+		t.Fatal("unconfigured application rendered a non-functional speech control")
+	}
+}
+
+// TestReviewFilePathEscapesAddressableGitPaths protects unusual but valid file names.
+func TestReviewFilePathEscapesAddressableGitPaths(t *testing.T) {
+	actual := reviewFilePath("/repositories/0123456789abcdef", "review-1", "docs/design notes#1.md")
+	expected := "/repositories/0123456789abcdef/reviews/review-1/files/docs/design%20notes%231.md"
+	if actual != expected {
+		t.Fatalf("reviewFilePath() = %q, want %q", actual, expected)
 	}
 }
 
@@ -136,7 +328,7 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 	}
 	thread := discussion.Threads[0]
 	threadPage := perform(app, http.MethodGet, reviewPath+"/threads/"+thread.ID, "")
-	for _, expected := range []string{"Please explain this boundary.", "comment-thread is-focused", reviewPath + "/comments/" + thread.Comments[0].ID, "data-controller=\"comment-thread\"", "name=\"author\" value=\"Patchflow Test\"", "data-comment-thread-id=\"" + thread.ID + "\"", "Edit comment"} {
+	for _, expected := range []string{"Please explain this boundary.", "comment-thread is-focused", reviewPath + "/comments/" + thread.Comments[0].ID, "data-controller=\"comment-thread speech\"", "name=\"author\" value=\"Patchflow Test\"", "data-comment-thread-id=\"" + thread.ID + "\"", "Edit comment"} {
 		if !strings.Contains(threadPage.Body.String(), expected) {
 			t.Errorf("thread page missing %q", expected)
 		}
@@ -181,6 +373,18 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 	if anchor.CommitSHA != stored.Review.Source.TargetSHA || anchor.StartLine != 1 || anchor.EndLine != 2 {
 		t.Fatalf("line anchor was not tied to target source: %#v", anchor)
 	}
+	classicFileView := performFrame(app, reviewPath+"/files/"+diffBlock.Path, fileFrameID(diffBlock.Path))
+	for _, expected := range []string{"These two lines belong together.", "data-comment-start=\"1\"", "data-comment-end=\"2\"", "data-comment-thread-id=\"" + discussion.Threads[1].ID + "\""} {
+		if !strings.Contains(classicFileView.Body.String(), expected) {
+			t.Errorf("classic file view missing shared discussion %q", expected)
+		}
+	}
+	discussionsPage := perform(app, http.MethodGet, reviewPath+"/discussions", "")
+	for _, expected := range []string{"data-review-tabs-view-value=\"discussions\"", "2 discussions", "Understand domain behavior", "Inspect security-sensitive behavior", "Please explain the ownership boundary.", "These two lines belong together.", "data-comment-thread-id=\"" + thread.ID + "\"", "data-comment-thread-id=\"" + discussion.Threads[1].ID + "\"", "Open block →", "action=\"" + reviewPath + "/threads/" + thread.ID + "/replies\"", "action=\"" + reviewPath + "/threads/" + thread.ID + "/resolution\""} {
+		if !strings.Contains(discussionsPage.Body.String(), expected) {
+			t.Errorf("discussions page missing %q", expected)
+		}
+	}
 
 	crossOrigin := httptest.NewRequest(http.MethodPost, reviewPath+"/blocks/domain-intro/threads", strings.NewReader(url.Values{"author": {"Mallory"}, "body": {"cross-site"}}.Encode()))
 	crossOrigin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -189,6 +393,94 @@ func TestAppPersistsAddressableBlockCodeAndReplyComments(t *testing.T) {
 	app.ServeHTTP(crossOriginResponse, crossOrigin)
 	if crossOriginResponse.Code != http.StatusForbidden {
 		t.Fatalf("cross-origin mutation returned %d", crossOriginResponse.Code)
+	}
+}
+
+// TestViewedProgressPersistsAcrossPlanAndFiles verifies shared state with view-specific collapse behavior.
+func TestViewedProgressPersistsAcrossPlanAndFiles(t *testing.T) {
+	repository := featureRepository(t)
+	app := newTestApp(t, repository)
+	created := perform(app, http.MethodPost, "/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
+	reviewPath := strings.Split(created.Header().Get("Location"), "?")[0]
+	filePath := "app/models/account.rb"
+
+	updated := performTurbo(app, http.MethodPost, reviewPath+"/viewed", url.Values{"path": {filePath}, "viewed": {"true"}}.Encode())
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), "turbo_viewed_update") && !strings.Contains(updated.Body.String(), "checked") {
+		t.Fatalf("viewed update failed: %d %s", updated.Code, updated.Body.String())
+	}
+	chapter := perform(app, http.MethodGet, reviewPath+"/steps/domain", "")
+	if !strings.Contains(chapter.Body.String(), "name=\"path\" value=\""+filePath+"\"") || !strings.Contains(chapter.Body.String(), "type=\"checkbox\" checked") || !strings.Contains(chapter.Body.String(), "data-controller=\"comment-thread plan-file-disclosure\"") || !strings.Contains(chapter.Body.String(), "data-plan-file-disclosure-target=\"content\" hidden") || !strings.Contains(chapter.Body.String(), "aria-expanded=\"false\"") {
+		t.Fatalf("plan does not show persisted viewed state: %s", chapter.Body.String())
+	}
+	frame := performFrame(app, reviewPath+"/files/"+filePath, fileFrameID(filePath))
+	if !strings.Contains(frame.Body.String(), "data-file-disclosure>") || strings.Contains(frame.Body.String(), "data-file-disclosure open") {
+		t.Fatalf("viewed classic file was not collapsed: %s", frame.Body.String())
+	}
+
+	cleared := performTurbo(app, http.MethodPost, reviewPath+"/viewed", url.Values{"path": {filePath}, "viewed": {"false"}}.Encode())
+	if cleared.Code != http.StatusOK || strings.Contains(cleared.Body.String(), "type=\"checkbox\" checked") {
+		t.Fatalf("viewed clear failed: %d %s", cleared.Code, cleared.Body.String())
+	}
+	chapter = perform(app, http.MethodGet, reviewPath+"/steps/domain", "")
+	if strings.Contains(chapter.Body.String(), "data-plan-file-disclosure-target=\"content\" hidden") {
+		t.Fatalf("unviewed plan evidence was not expanded: %s", chapter.Body.String())
+	}
+	frame = performFrame(app, reviewPath+"/files/"+filePath, fileFrameID(filePath))
+	if !strings.Contains(frame.Body.String(), "data-file-disclosure open") {
+		t.Fatalf("unviewed classic file was not expanded: %s", frame.Body.String())
+	}
+}
+
+// TestImageBlockRendersAndServesOnlyDeclaredRasterContent exercises the image contract end to end.
+func TestImageBlockRendersAndServesOnlyDeclaredRasterContent(t *testing.T) {
+	repository := featureRepository(t)
+	app := newTestApp(t, repository)
+	created := perform(app, http.MethodPost, "/reviews", url.Values{"base_ref": {"main"}, "target_ref": {"HEAD"}}.Encode())
+	reviewPath := strings.Split(created.Header().Get("Location"), "?")[0]
+	reviewID := reviewIDFromPath(reviewPath)
+	store, _ := patchreview.NewStore(repository, nil)
+	stored, _ := store.Find(reviewID)
+	domainIndex := -1
+	for index := range stored.Review.Steps {
+		if stored.Review.Steps[index].ID == "domain" {
+			domainIndex = index
+			break
+		}
+	}
+	if domainIndex < 0 {
+		t.Fatal("generated review has no domain step")
+	}
+	blocks := stored.Review.Steps[domainIndex].Blocks
+	image := artifact.Block{ID: "account-screen", Type: "image", Path: "assets/account-screen.png", Alt: "Account screen showing the locked state", Caption: "Inspect the **locked** state beside the account name."}
+	stored.Review.Steps[domainIndex].Blocks = append(append(append([]artifact.Block{}, blocks[:len(blocks)-1]...), image), blocks[len(blocks)-1])
+	serialized, err := yaml.Marshal(stored.Review)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stored.Path, serialized, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Find(reviewID); err != nil {
+		t.Fatalf("image review is invalid: %v", err)
+	}
+	assets := filepath.Join(filepath.Dir(stored.Path), "assets")
+	if err := os.MkdirAll(assets, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	png, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")
+	if err := os.WriteFile(filepath.Join(assets, "account-screen.png"), png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	chapter := perform(app, http.MethodGet, reviewPath+"/steps/domain", "")
+	for _, expected := range []string{"data-controller=\"image-viewer comment-thread speech\"", "alt=\"Account screen showing the locked state\"", "Inspect the **locked** state", reviewPath + "/images/account-screen"} {
+		if !strings.Contains(chapter.Body.String(), expected) {
+			t.Errorf("image chapter missing %q", expected)
+		}
+	}
+	response := perform(app, http.MethodGet, reviewPath+"/images/account-screen", "")
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "image/png" || !strings.Contains(response.Header().Get("Cache-Control"), "no-cache") || response.Body.Len() != len(png) {
+		t.Fatalf("image response failed: %d %q %d", response.Code, response.Header().Get("Content-Type"), response.Body.Len())
 	}
 }
 
@@ -431,6 +723,15 @@ func performTurbo(handler http.Handler, method, path, body string) *httptest.Res
 	return response
 }
 
+// performFrame sends one lazy Turbo Frame request for a changed-file resource.
+func performFrame(handler http.Handler, path, frameID string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.Header.Set("Turbo-Frame", frameID)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
 // reviewIDFromPath extracts the final review resource segment from a scoped URL.
 func reviewIDFromPath(reviewPath string) string {
 	parts := strings.Split(strings.Trim(reviewPath, "/"), "/")
@@ -447,7 +748,16 @@ func newTestApp(t *testing.T, defaultRepository string) *App {
 	if err != nil {
 		t.Fatal(err)
 	}
+	app.speech = stubSpeechSynthesizer{}
 	return app
+}
+
+// stubSpeechSynthesizer returns deterministic PCM bytes for browser contract tests.
+type stubSpeechSynthesizer struct{}
+
+// Stream emits a small deterministic audio chunk without external processes.
+func (stubSpeechSynthesizer) Stream(_ context.Context, _ string, emit func(patchspeech.Chunk) error) error {
+	return emit(patchspeech.Chunk{SampleRate: 22_050, Channels: 1, BitsPerSample: 16, Data: []byte{1, 0, 2, 0}})
 }
 
 // featureRepository creates a small two-commit repository used by HTTP flows.
@@ -457,12 +767,14 @@ func featureRepository(t *testing.T) string {
 	git(t, directory, "init", "-b", "main")
 	git(t, directory, "config", "user.email", "patchflow@example.test")
 	git(t, directory, "config", "user.name", "Patchflow Test")
-	git(t, directory, "remote", "add", "origin", "git@github.com:traqx-ai/patchflow.git")
-	write(t, directory, "app/models/account.rb", "class Account\nend\n")
+	git(t, directory, "remote", "add", "origin", "git@github.com:code-constructor/patchflow.git")
+	prefix := "class Account\n" + strings.Repeat("  # unchanged context\n", 125)
+	suffix := strings.Repeat("  # more unchanged context\n", 125) + "end\n"
+	write(t, directory, "app/models/account.rb", prefix+"  def locked? = false\n"+suffix)
 	git(t, directory, "add", ".")
 	git(t, directory, "commit", "-m", "Initial application")
 	git(t, directory, "checkout", "-b", "feature/account-locking")
-	write(t, directory, "app/models/account.rb", "class Account\n  def locked? = true\nend\n")
+	write(t, directory, "app/models/account.rb", prefix+"  def locked? = true\n"+suffix)
 	write(t, directory, "app/controllers/sessions_controller.rb", "class SessionsController\nend\n")
 	write(t, directory, "config/auth_policy.rb", "AUTH_POLICY = :local_only\n")
 	write(t, directory, "test/models/account_test.rb", "# account locking behavior\n")

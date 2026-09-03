@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
@@ -72,12 +73,25 @@ func highlightLine(path, source string) template.HTML {
 	if err != nil {
 		return template.HTML(template.HTMLEscapeString(source))
 	}
+	iterator = withoutErrorTokens(iterator)
 	formatter := html.New(html.WithClasses(false), html.PreventSurroundingPre(true))
 	var output bytes.Buffer
 	if err := formatter.Format(&output, styles.Get("github"), iterator); err != nil {
 		return template.HTML(template.HTMLEscapeString(source))
 	}
 	return template.HTML(output.String())
+}
+
+// withoutErrorTokens downgrades lexer error tokens to plain text because a
+// single diff line lacks the surrounding context a stateful grammar expects.
+func withoutErrorTokens(iterator chroma.Iterator) chroma.Iterator {
+	tokens := iterator.Tokens()
+	for index := range tokens {
+		if tokens[index].Type == chroma.Error {
+			tokens[index].Type = chroma.Text
+		}
+	}
+	return chroma.Literator(tokens...)
 }
 
 // parseNumber converts an ASCII decimal line number without exposing parse errors.

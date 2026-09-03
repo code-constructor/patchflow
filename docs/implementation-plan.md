@@ -10,7 +10,7 @@ a committed base branch from beginning to end:
 3. Create and validate a repository-local review artifact.
 4. Render an overview with an ordered set of review steps.
 5. Compose each step from ordered prose, code, diff, callout, question,
-   diagram, and takeaway blocks.
+   diagram, image, and takeaway blocks.
 6. Render syntax-highlighted split and unified diffs inside that narrative.
 7. Validate the artifact contract and fixtures in the Go runtime.
 8. Provide a Coding Agent skill that can create and enrich the same artifact.
@@ -18,6 +18,10 @@ a committed base branch from beginning to end:
    the URL.
 10. Persist addressable block and source-range discussions shared by UI, CLI,
     and Coding Agents.
+11. Provide a classic changed-file tree beside the guided plan, with a lazy
+    continuous exact-SHA diff stream and independent navigation memory.
+12. Persist personal Viewed progress outside the shared artifact and render
+    safe, fullscreen-capable raster image evidence inside review chapters.
 
 This slice intentionally supports committed text changes in local repositories.
 Working-tree changes, hosted pull-request import, binary viewers, large-diff
@@ -36,6 +40,10 @@ virtualization, and multi-user review are later work.
   shell-interpolated commands.
 - Refs resolve to SHAs before diffing. Artifacts never silently follow a moving
   branch.
+- Guided chapters and changed-file resources have separate URLs. Turbo Drive
+  handles transitions, while browser-tab-local memory restores only the last
+  route and scroll offset for each view; selected files and diff layout remain
+  addressable in the URL.
 - Paths from requests and artifacts are untrusted. Review files stay below the
   selected repository's `.patchflow/reviews` directory, and diff paths stay
   within the selected repository.
@@ -136,16 +144,29 @@ through Turbo Streams. The chapter, reading position, open popover, and
 unrelated comment windows remain stable. The CLI offers the same list, show,
 create, reply, resolve, and reopen lifecycle for humans and agents.
 
-### 12. Classic source review — planned
+### 12. Classic source review — complete
 
-Add an optional files-first review surface for reviewers who need to inspect the
+Provide an optional files-first review surface for reviewers who need to inspect the
 complete change outside the guided chapters. Provide changed-file navigation,
 syntax-highlighted unified and split diffs, and the familiar ability to open a
 thread on one line or a selected line range.
 
 Render the same persisted threads from milestone 11 both beside chapter evidence
 and in the source browser. The files view is a second way to traverse one review,
-not a second comment store or a competing review format.
+not a second comment store or a competing review format. Render all file shells
+in one continuous document, lazy-load diff frames near the viewport, and keep
+tree selection, scrolling, history, and shareable file URLs synchronized.
+
+### 13. Personal progress and visual evidence — complete
+
+Store Viewed paths in the local user configuration, keyed by repository,
+review ID, and immutable target SHA. Collapse viewed files only in the classic
+surface; keep guided evidence expanded and show the same toggle as status.
+
+Add validated `image` blocks for screenshots and rendered evidence. Restrict
+assets to declared PNG, JPEG, GIF, and WebP files under each review's `assets/`
+directory, serve them through a safe block-addressed endpoint, and provide
+responsive inline and fullscreen views with alt text and optional captions.
 
 ## Acceptance scenario
 

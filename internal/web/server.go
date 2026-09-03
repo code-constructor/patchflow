@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"embed"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -17,17 +19,26 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+	"unicode/utf8"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
-	"github.com/traqx-ai/patchflow/internal/gitrepo"
-	patchreview "github.com/traqx-ai/patchflow/internal/review"
-	patchsettings "github.com/traqx-ai/patchflow/internal/settings"
+	"github.com/code-constructor/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/gitrepo"
+	patchreview "github.com/code-constructor/patchflow/internal/review"
+	patchsettings "github.com/code-constructor/patchflow/internal/settings"
+	patchspeech "github.com/code-constructor/patchflow/internal/speech"
 )
 
 //go:embed templates/*.html assets
 var embedded embed.FS
 
 const repositoryCookie = "patchflow_repository"
+const maxReviewImageBytes int64 = 20 << 20
+const defaultDiffContext = 3
+const diffContextBatch = 100
+const maxDiffContext = 100_003
+const maxSpeechTextCharacters = 12_000
+const speechStreamErrorFrame = ^uint32(0)
 
 type repositoryScopeKey struct{}
 
@@ -44,26 +55,37 @@ type App struct {
 	defaultRepository string
 	browseRoot        string
 	settings          *patchsettings.Store
+	speech            patchspeech.Synthesizer
 	logger            *slog.Logger
 }
 
 // Page contains the shared and route-specific data rendered by the layout.
 type Page struct {
-	Title          string
-	BasePath       string
-	RepositoryName string
-	GitHub         *GitHubLinkView
-	Notice         string
-	Alert          string
-	Repository     *RepositoryView
-	Repositories   []RepositoryView
-	RepositoryPath string
-	Reviews        []ReviewListItem
-	BaseRef        string
-	TargetRef      string
-	Review         *ReviewView
-	Chapter        *ChapterView
-	PickerRoot     string
+	Title            string
+	BasePath         string
+	BackPath         string
+	BackLabel        string
+	ReviewHomePath   string
+	NewReviewPath    string
+	RepositoryName   string
+	GitHub           *GitHubLinkView
+	Notice           string
+	Alert            string
+	Repository       *RepositoryView
+	Repositories     []RepositoryView
+	RepositoryPath   string
+	CurrentReviews   []ReviewListItem
+	StaleReviews     []ReviewListItem
+	StaleThreadLabel string
+	BaseRef          string
+	TargetRef        string
+	Review           *ReviewView
+	Chapter          *ChapterView
+	ReviewNavigation *ReviewNavigationView
+	Files            *FilesView
+	Discussions      *DiscussionsView
+	PickerRoot       string
+	SpeechAvailable  bool
 }
 
 // GitHubLinkView describes the external GitHub destination shown on review pages.
@@ -76,14 +98,18 @@ type RepositoryView struct {
 	Name, Path, BasePath, ReviewLabel string
 }
 
-// ReviewListItem is the compact representation used by the home-page review list.
-type ReviewListItem struct{ ID, Title, Summary, Status string }
+// ReviewListItem summarizes one review's lifecycle, Git freshness, and discussion state.
+type ReviewListItem struct {
+	ID, Title, Summary, Status, StatusKey string
+	CreatedAt, Comparison, ThreadLabel    string
+	Latest                                bool
+}
 
 // ReviewView is the overview page model for one stored review.
 type ReviewView struct {
-	ID, Title, Summary, Status, BaseSHA, TargetSHA, Overview string
-	Stale                                                    bool
-	Steps                                                    []StepLink
+	ID, Title, Summary, Status, StatusKey, BaseSHA, TargetSHA, Overview string
+	Stale                                                               bool
+	Steps                                                               []StepLink
 }
 
 // StepLink is a navigable chapter summary.
@@ -126,6 +152,9 @@ type BlockView struct {
 	Focus           string
 	Highlights      string
 	DiagramMarkdown string
+	Alt             string
+	Caption         string
+	ImageURL        string
 	ReferencePath   string
 	ReferenceLabel  string
 	Label           string
@@ -137,8 +166,25 @@ type BlockView struct {
 	ThreadAnchors   string
 	ReviewerName    string
 	Commentable     bool
+	Readable        bool
+	DiffContextPath string
+	CanExpandDiff   bool
 	Focused         bool
 	Collapsed       bool
+	Viewed          *ViewedControlView
+}
+
+// ViewedControlView describes one shared personal progress toggle for a changed path.
+type ViewedControlView struct {
+	Key, Path, Action string
+	Viewed            bool
+}
+
+// TurboViewedUpdateView updates every visible toggle and status marker for one path.
+type TurboViewedUpdateView struct {
+	Control          ViewedControlView
+	ControlTargets   string
+	IndicatorTargets string
 }
 
 // CodeLine is one numbered source line with trusted server-generated highlighting.
@@ -220,6 +266,58 @@ func NewAppWithSettings(defaultRepository, settingsPath string, logger *slog.Log
 	return newApp(defaultRepository, settingsPath, logger)
 }
 
+// NewAppWithSettingsAndSpeech assembles the application with persistent settings and local speech synthesis.
+func NewAppWithSettingsAndSpeech(defaultRepository, settingsPath string, synthesizer patchspeech.Synthesizer, logger *slog.Logger) (*App, error) {
+	return NewAppWithOptions(Options{DefaultRepository: defaultRepository, SettingsPath: settingsPath, Speech: synthesizer, Logger: logger})
+}
+
+// Options collects every deployment-specific input of the local application.
+type Options struct {
+	// DefaultRepository is preselected when the server starts; empty shows the picker.
+	DefaultRepository string
+	// SettingsPath overrides the user configuration file location.
+	SettingsPath string
+	// BrowseRoot bounds the repository picker; empty falls back to discovery.
+	BrowseRoot string
+	// Speech is the optional local synthesizer behind the read-aloud controls.
+	Speech patchspeech.Synthesizer
+	// Logger receives request and validation diagnostics; nil uses slog.Default.
+	Logger *slog.Logger
+}
+
+// NewAppWithOptions assembles the application from explicit deployment options.
+func NewAppWithOptions(options Options) (*App, error) {
+	app, err := newApp(options.DefaultRepository, options.SettingsPath, options.Logger)
+	if err != nil {
+		return nil, err
+	}
+	app.speech = options.Speech
+	if options.BrowseRoot != "" {
+		root, rootErr := browseRootFromOption(options.BrowseRoot)
+		if rootErr != nil {
+			return nil, rootErr
+		}
+		app.browseRoot = root
+	}
+	return app, nil
+}
+
+// browseRootFromOption validates an explicitly configured picker root.
+func browseRootFromOption(root string) (string, error) {
+	if !filepath.IsAbs(root) {
+		return "", fmt.Errorf("browse root must be an absolute path: %s", root)
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("cannot access browse root: %w", err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil || !info.IsDir() {
+		return "", fmt.Errorf("browse root is not a directory: %s", root)
+	}
+	return resolved, nil
+}
+
 // newApp assembles the application with an injectable settings path for isolated tests.
 func newApp(defaultRepository, settingsPath string, logger *slog.Logger) (*App, error) {
 	if logger == nil {
@@ -240,7 +338,7 @@ func newApp(defaultRepository, settingsPath string, logger *slog.Logger) (*App, 
 		return nil, fmt.Errorf("parse common templates: %w", err)
 	}
 	templates := map[string]*template.Template{}
-	for _, name := range []string{"home", "new", "overview", "chapter"} {
+	for _, name := range []string{"home", "new", "overview", "chapter", "files", "discussions"} {
 		page, cloneErr := common.Clone()
 		if cloneErr != nil {
 			return nil, cloneErr
@@ -285,6 +383,10 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
 		return
 	}
+	if r.Method == http.MethodPost && r.URL.Path == "/speech" {
+		a.synthesizeSpeech(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/repositories/") {
 		var ok bool
 		r, ok = requestWithinRepositoryScope(r)
@@ -315,14 +417,22 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.editComment(w, r)
 	case r.Method == http.MethodPost && matchActionPath(r.URL.Path, "threads", "resolution"):
 		a.updateThreadResolution(w, r)
+	case r.Method == http.MethodPost && matchViewedPath(r.URL.Path):
+		a.updateViewed(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/comments/"):
 		a.comment(w, r)
+	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/images/"):
+		a.reviewImage(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/threads/"):
 		a.thread(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/blocks/"):
 		a.block(w, r)
 	case r.Method == http.MethodGet && matchPath(r.URL.Path, "/reviews/", "/steps/"):
 		a.chapter(w, r)
+	case r.Method == http.MethodGet && matchDiscussionsPath(r.URL.Path):
+		a.discussions(w, r)
+	case r.Method == http.MethodGet && matchFilesPath(r.URL.Path):
+		a.files(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/reviews/"):
 		a.overview(w, r)
 	default:
@@ -354,8 +464,21 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 			if allErr != nil {
 				page.Alert = allErr.Error()
 			} else {
-				for _, item := range stored {
-					page.Reviews = append(page.Reviews, ReviewListItem{ID: item.Review.ID, Title: item.Review.Change.Title, Summary: item.Review.Change.Summary, Status: humanize(item.Review.Status)})
+				staleOpenThreads := 0
+				for index := range stored {
+					item, stale, openThreads := buildReviewListItem(repository, store, &stored[index])
+					if stale {
+						page.StaleReviews = append(page.StaleReviews, item)
+						staleOpenThreads += openThreads
+					} else {
+						page.CurrentReviews = append(page.CurrentReviews, item)
+					}
+				}
+				if len(page.CurrentReviews) > 0 {
+					page.CurrentReviews[0].Latest = true
+				}
+				if staleOpenThreads > 0 {
+					page.StaleThreadLabel = openThreadLabel(staleOpenThreads)
 				}
 			}
 		} else {
@@ -365,6 +488,56 @@ func (a *App) home(w http.ResponseWriter, r *http.Request) {
 		page.Alert = err.Error()
 	}
 	a.render(w, "home", page, http.StatusOK)
+}
+
+// buildReviewListItem derives display state without mutating immutable review artifacts.
+func buildReviewListItem(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored) (ReviewListItem, bool, int) {
+	openThreads := 0
+	if discussion, err := store.ReadDiscussion(stored); err == nil {
+		for _, thread := range discussion.Threads {
+			if !thread.Resolved {
+				openThreads++
+			}
+		}
+	}
+	review := stored.Review
+	item := ReviewListItem{
+		ID: review.ID, Title: review.Change.Title, Summary: review.Change.Summary,
+		Status: humanize(review.Status), StatusKey: review.Status,
+		CreatedAt: formatReviewTimestamp(review.CreatedAt), Comparison: review.Source.BaseRef + " → " + review.Source.TargetRef,
+		ThreadLabel: openThreadLabel(openThreads),
+	}
+	return item, reviewIsStale(repository, review), openThreads
+}
+
+// reviewIsStale reports whether stored evidence no longer represents its moving target ref.
+func reviewIsStale(repository *gitrepo.Repository, review *artifact.Review) bool {
+	if review.Status == "stale" {
+		return true
+	}
+	changed, err := repository.TargetChanged(review.Source.TargetRef, review.Source.TargetSHA)
+	return err != nil || changed
+}
+
+// formatReviewTimestamp turns an artifact timestamp into compact UTC list metadata.
+func formatReviewTimestamp(value string) string {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return value
+	}
+	return parsed.UTC().Format("02 Jan 2006 · 15:04 UTC")
+}
+
+// openThreadLabel describes unresolved discussion without displaying an empty count.
+func openThreadLabel(count int) string {
+	switch count {
+	case 0:
+		return ""
+	case 1:
+		return "1 unresolved thread"
+	default:
+		return fmt.Sprintf("%d unresolved threads", count)
+	}
 }
 
 // repositoryPicker renders one safely bounded directory level into a Turbo Frame.
@@ -472,15 +645,13 @@ func (a *App) overview(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		overview = err.Error()
 	}
-	stale, staleErr := repository.TargetChanged(stored.Review.Source.TargetRef, stored.Review.Source.TargetSHA)
-	if staleErr != nil {
-		stale = false
-	}
-	view := ReviewView{ID: id, Title: stored.Review.Change.Title, Summary: stored.Review.Change.Summary, Status: humanize(stored.Review.Status), BaseSHA: stored.Review.Source.BaseSHA, TargetSHA: stored.Review.Source.TargetSHA, Overview: overview, Stale: stale}
+	stale := reviewIsStale(repository, stored.Review)
+	view := ReviewView{ID: id, Title: stored.Review.Change.Title, Summary: stored.Review.Change.Summary, Status: humanize(stored.Review.Status), StatusKey: stored.Review.Status, BaseSHA: stored.Review.Source.BaseSHA, TargetSHA: stored.Review.Source.TargetSHA, Overview: overview, Stale: stale}
 	for _, step := range stored.Review.Steps {
 		view.Steps = append(view.Steps, StepLink{ID: step.ID, Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, Attention: step.Attention})
 	}
-	a.render(w, "overview", Page{Title: view.Title + " · Patchflow", BasePath: requestRepositoryBasePath(r, repository), RepositoryName: repository.Name(), GitHub: githubLinkView(repository, stored.Review.Source.TargetRef), Notice: r.URL.Query().Get("notice"), Review: &view}, http.StatusOK)
+	basePath := requestRepositoryBasePath(r, repository)
+	a.render(w, "overview", Page{Title: view.Title + " · Patchflow", BasePath: basePath, RepositoryName: repository.Name(), GitHub: githubLinkView(repository, stored.Review.Source.TargetRef), ReviewNavigation: reviewNavigationView(basePath, stored, "plan"), Notice: r.URL.Query().Get("notice"), Review: &view}, http.StatusOK)
 }
 
 // chapter resolves an artifact step into renderable prose, code, diff, and diagram blocks.
@@ -511,11 +682,11 @@ func (a *App) chapter(w http.ResponseWriter, r *http.Request) {
 		redirect(w, r, requestRepositoryBasePath(r, repository)+"/reviews/"+stored.Review.ID, "alert", "Review step not found.")
 		return
 	}
-	a.renderChapter(w, repository, store, stored, requestRepositoryBasePath(r, repository), stepIndex, "", "", "", r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
+	a.renderChapter(w, repository, store, stored, requestRepositoryBasePath(r, repository), stepIndex, "", "", "", "", defaultDiffContext, r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
 }
 
 // renderChapter resolves one step and optionally highlights an addressed block.
-func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, basePath string, stepIndex int, focusedBlockID, focusedThreadID, focusedCommentID, notice, alert string) {
+func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, basePath string, stepIndex int, focusedBlockID, focusedThreadID, focusedCommentID, expandedBlockID string, diffContext int, notice, alert string) {
 	step := stored.Review.Steps[stepIndex]
 	chapter := ChapterView{BasePath: basePath, ReviewID: stored.Review.ID, Number: stepIndex + 1, Total: len(stored.Review.Steps), Title: step.Title, Rationale: step.Rationale, Priority: step.Priority, ReviewQuestion: step.ReviewQuestion, Attention: step.Attention, DesignGate: step.Priority == "critical" && step.ReviewQuestion != ""}
 	if stepIndex > 0 {
@@ -543,9 +714,25 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 	if reviewerErr != nil {
 		reviewerName = "Reviewer"
 	}
+	viewed, progressErr := a.settings.ViewedFiles(repository.Root(), stored.Review.ID, stored.Review.Source.TargetSHA)
+	if progressErr != nil {
+		alert = progressErr.Error()
+		viewed = map[string]bool{}
+	}
 	for _, block := range blocks {
-		view := buildBlock(repository, store, stored, files, block)
+		blockContext := defaultDiffContext
+		if block.ID == expandedBlockID {
+			blockContext = diffContext
+		}
+		view := buildBlock(repository, store, stored, files, block, blockContext)
+		view.Readable = view.Readable && a.speech != nil
+		if block.Type == "image" {
+			view.ImageURL = basePath + "/reviews/" + stored.Review.ID + "/images/" + block.ID
+		}
 		view.ReferencePath = basePath + "/reviews/" + stored.Review.ID + "/blocks/" + block.ID
+		if view.CanExpandDiff {
+			view.DiffContextPath = view.ReferencePath + "?context=" + strconv.Itoa(nextDiffContext(blockContext))
+		}
 		view.ReferenceLabel = "block " + block.ID
 		view.Label = blockLabel(block)
 		view.Focused = block.ID == focusedBlockID
@@ -553,9 +740,226 @@ func (a *App) renderChapter(w http.ResponseWriter, repository *gitrepo.Repositor
 		view.ThreadAction = view.ReferencePath + "/threads"
 		view.ReviewerName = reviewerName
 		view.Threads, view.ThreadAnchors = buildThreadViews(basePath, stored.Review.ID, block.ID, reviewerName, discussion, focusedThreadID, focusedCommentID)
+		if (block.Type == "diff" || block.Type == "code") && block.Path != "" {
+			view.Viewed = viewedControl(basePath, stored, block.Path, viewed[block.Path])
+		}
 		chapter.Blocks = append(chapter.Blocks, view)
 	}
-	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", BasePath: basePath, RepositoryName: repository.Name(), GitHub: githubLinkView(repository, stored.Review.Source.TargetRef), Chapter: &chapter, Notice: notice, Alert: alert}, http.StatusOK)
+	a.render(w, "chapter", Page{Title: step.Title + " · Patchflow", BasePath: basePath, RepositoryName: repository.Name(), GitHub: githubLinkView(repository, stored.Review.Source.TargetRef), ReviewNavigation: reviewNavigationView(basePath, stored, "plan"), Chapter: &chapter, Notice: notice, Alert: alert}, http.StatusOK)
+}
+
+// reviewImage serves only a declared raster block asset from its safe review directory.
+func (a *App) reviewImage(w http.ResponseWriter, r *http.Request) {
+	repository, ok := a.requireRepository(w, r)
+	if !ok {
+		return
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "reviews" || parts[2] != "images" {
+		http.NotFound(w, r)
+		return
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	location, err := store.FindBlock(parts[1], parts[3])
+	if err != nil || location.Block.Type != "image" {
+		http.NotFound(w, r)
+		return
+	}
+	size, err := store.AssetSize(location.Stored, location.Block.Path)
+	if err != nil || size > maxReviewImageBytes {
+		http.NotFound(w, r)
+		return
+	}
+	content, err := store.ReadAssetBytes(location.Stored, location.Block.Path)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	contentType := http.DetectContentType(content)
+	if !allowedReviewImageType(contentType) {
+		http.Error(w, "Unsupported review image type", http.StatusUnsupportedMediaType)
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
+}
+
+// synthesizeSpeech validates one narrative request and flushes framed PCM as each phrase is generated.
+func (a *App) synthesizeSpeech(w http.ResponseWriter, r *http.Request) {
+	if !validMutationOrigin(r) {
+		http.Error(w, "Cross-origin speech request rejected", http.StatusForbidden)
+		return
+	}
+	if a.speech == nil {
+		http.Error(w, "Local speech synthesis is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	defer r.Body.Close()
+	var request struct {
+		Text string `json:"text"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(w, "Speech request must contain valid JSON text", http.StatusBadRequest)
+		return
+	}
+	request.Text = strings.TrimSpace(request.Text)
+	if request.Text == "" || !utf8.ValidString(request.Text) || utf8.RuneCountInString(request.Text) > maxSpeechTextCharacters {
+		http.Error(w, "Speech text must contain between 1 and 12000 characters", http.StatusUnprocessableEntity)
+		return
+	}
+	flusher, canFlush := w.(http.Flusher)
+	if !canFlush {
+		http.Error(w, "Streaming speech is unavailable for this connection", http.StatusInternalServerError)
+		return
+	}
+	started := false
+	var sampleRate, channels, bitsPerSample int
+	err := a.speech.Stream(r.Context(), request.Text, func(chunk patchspeech.Chunk) error {
+		if chunk.SampleRate <= 0 || chunk.Channels <= 0 || chunk.BitsPerSample != 16 || len(chunk.Data) == 0 {
+			return errors.New("local speech provider returned an unsupported audio chunk")
+		}
+		if !started {
+			sampleRate = chunk.SampleRate
+			channels = chunk.Channels
+			bitsPerSample = chunk.BitsPerSample
+			w.Header().Set("Content-Type", "application/vnd.patchflow.pcm-stream")
+			w.Header().Set("Cache-Control", "private, no-store")
+			w.Header().Set("X-Patchflow-Sample-Rate", strconv.Itoa(sampleRate))
+			w.Header().Set("X-Patchflow-Channels", strconv.Itoa(channels))
+			w.Header().Set("X-Patchflow-Bits-Per-Sample", strconv.Itoa(bitsPerSample))
+			w.WriteHeader(http.StatusOK)
+			started = true
+		} else if chunk.SampleRate != sampleRate || chunk.Channels != channels || chunk.BitsPerSample != bitsPerSample {
+			return errors.New("local speech provider changed audio format during playback")
+		}
+		if err := writeSpeechFrame(w, uint32(len(chunk.Data)), chunk.Data); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	})
+	if err != nil {
+		a.logger.Error("synthesize speech", "error", err)
+		if !started {
+			http.Error(w, "The local speech provider could not synthesize this block", http.StatusBadGateway)
+			return
+		}
+		_ = writeSpeechFrame(w, speechStreamErrorFrame, nil)
+		flusher.Flush()
+		return
+	}
+	if !started {
+		http.Error(w, "The local speech provider returned no audio", http.StatusBadGateway)
+		return
+	}
+	_ = writeSpeechFrame(w, 0, nil)
+	flusher.Flush()
+}
+
+// writeSpeechFrame writes one little-endian length prefix followed by its PCM payload.
+func writeSpeechFrame(w http.ResponseWriter, length uint32, payload []byte) error {
+	var prefix [4]byte
+	binary.LittleEndian.PutUint32(prefix[:], length)
+	if _, err := w.Write(prefix[:]); err != nil {
+		return err
+	}
+	if len(payload) == 0 {
+		return nil
+	}
+	_, err := w.Write(payload)
+	return err
+}
+
+// allowedReviewImageType restricts inline assets to inert browser raster formats.
+func allowedReviewImageType(contentType string) bool {
+	return contentType == "image/png" || contentType == "image/jpeg" || contentType == "image/gif" || contentType == "image/webp"
+}
+
+// updateViewed persists one personal file-review progress toggle and answers inline.
+func (a *App) updateViewed(w http.ResponseWriter, r *http.Request) {
+	if !validMutationOrigin(r) {
+		http.Error(w, "Cross-origin form submission rejected", http.StatusForbidden)
+		return
+	}
+	repository, ok := a.requireRepository(w, r)
+	if !ok {
+		return
+	}
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(parts) != 3 || parts[0] != "reviews" || parts[2] != "viewed" {
+		http.NotFound(w, r)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+	store, err := patchreview.NewStore(repository.Root(), nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	stored, err := store.Find(parts[1])
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	filePath := r.FormValue("path")
+	if !reviewEvidencePath(stored.Review, filePath) {
+		http.Error(w, "Viewed path is not review evidence", http.StatusUnprocessableEntity)
+		return
+	}
+	viewed := r.FormValue("viewed") == "true"
+	if err := a.settings.SetFileViewed(repository.Root(), stored.Review.ID, stored.Review.Source.TargetSHA, filePath, viewed); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+	basePath := requestRepositoryBasePath(r, repository)
+	control := viewedControl(basePath, stored, filePath, viewed)
+	if wantsTurboStream(r) {
+		a.renderTurboStream(w, "turbo_viewed_update", TurboViewedUpdateView{
+			Control: *control, ControlTargets: "[data-viewed-key=\"" + control.Key + "\"]",
+			IndicatorTargets: "[data-viewed-indicator-key=\"" + control.Key + "\"]",
+		})
+		return
+	}
+	redirect(w, r, basePath+"/reviews/"+stored.Review.ID, "notice", "Review progress saved.")
+}
+
+// reviewEvidencePath accepts changed files and unchanged context declared by code blocks.
+func reviewEvidencePath(review *artifact.Review, filePath string) bool {
+	if _, found := findChangedFile(review.Change.Files, filePath); found {
+		return true
+	}
+	for _, step := range review.Steps {
+		for _, block := range step.Blocks {
+			if block.Type == "code" && block.Path == filePath {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// viewedControl builds the shared control identity for plan and file views.
+func viewedControl(basePath string, stored *patchreview.Stored, filePath string, viewed bool) *ViewedControlView {
+	return &ViewedControlView{Key: fileProgressKey(filePath), Path: filePath, Action: basePath + "/reviews/" + stored.Review.ID + "/viewed", Viewed: viewed}
+}
+
+// fileProgressKey creates a CSS-safe identity shared by all views of a path.
+func fileProgressKey(filePath string) string {
+	digest := sha256.Sum256([]byte(filePath))
+	return fmt.Sprintf("viewed-%x", digest[:8])
 }
 
 // githubLinkView derives a review destination without making a hosted-service request.
@@ -601,7 +1005,7 @@ func (a *App) block(w http.ResponseWriter, r *http.Request) {
 			if block.ID != parts[3] {
 				continue
 			}
-			a.renderChapter(w, repository, store, stored, requestRepositoryBasePath(r, repository), stepIndex, block.ID, "", "", r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
+			a.renderChapter(w, repository, store, stored, requestRepositoryBasePath(r, repository), stepIndex, block.ID, "", "", block.ID, requestedDiffContext(r), r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
 			return
 		}
 	}
@@ -660,7 +1064,7 @@ func (a *App) renderDiscussionReference(w http.ResponseWriter, r *http.Request, 
 		http.NotFound(w, r)
 		return
 	}
-	a.renderChapter(w, repository, store, blockLocation.Stored, requestRepositoryBasePath(r, repository), blockLocation.StepIndex, blockID, focusedThreadID, focusedCommentID, r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
+	a.renderChapter(w, repository, store, blockLocation.Stored, requestRepositoryBasePath(r, repository), blockLocation.StepIndex, blockID, focusedThreadID, focusedCommentID, "", defaultDiffContext, r.URL.Query().Get("notice"), r.URL.Query().Get("alert"))
 }
 
 // createThread persists a block or selected source-range comment from the chapter UI.
@@ -836,17 +1240,23 @@ func (a *App) updateThreadResolution(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildBlock joins a declarative artifact block with evidence from its recorded commits.
-func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, files map[string]artifact.ChangedFile, block artifact.Block) BlockView {
-	view := BlockView{ID: block.ID, Type: block.Type, Body: block.Body, Kind: block.Kind, Path: block.Path, View: defaultString(block.View, "split"), SourceSide: block.Source, StartLine: block.StartLine, EndLine: block.EndLine, Collapsed: block.Collapsed}
+func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored *patchreview.Stored, files map[string]artifact.ChangedFile, block artifact.Block, diffContext int) BlockView {
+	readable := block.Type == "prose" || block.Type == "callout" || block.Type == "question" || block.Type == "takeaway" || (block.Type == "image" && block.Caption != "")
+	view := BlockView{ID: block.ID, Type: block.Type, Body: block.Body, Kind: block.Kind, Path: block.Path, View: defaultString(block.View, "split"), SourceSide: block.Source, StartLine: block.StartLine, EndLine: block.EndLine, Collapsed: block.Collapsed, Alt: block.Alt, Caption: block.Caption, Readable: readable}
 	switch block.Type {
 	case "diff":
 		file := files[block.Path]
-		source, err := repository.Diff(stored.Review.Source.BaseSHA, stored.Review.Source.TargetSHA, block.Path, file.PreviousPath)
+		source, err := repository.DiffWithContext(stored.Review.Source.BaseSHA, stored.Review.Source.TargetSHA, block.Path, file.PreviousPath, diffContext)
 		if err != nil {
 			view.Error = err.Error()
 		} else {
 			view.Source = source
 			view.Highlights = highlightDiffJSON(block.Path, source)
+			nextContext := nextDiffContext(diffContext)
+			if nextContext > diffContext {
+				expanded, expandErr := repository.DiffWithContext(stored.Review.Source.BaseSHA, stored.Review.Source.TargetSHA, block.Path, file.PreviousPath, nextContext)
+				view.CanExpandDiff = expandErr == nil && expanded != source
+			}
 		}
 		if block.Focus != nil {
 			end := block.Focus.EndLine
@@ -876,16 +1286,43 @@ func buildBlock(repository *gitrepo.Repository, store *patchreview.Store, stored
 		} else {
 			view.DiagramMarkdown = "```mermaid\n" + source + "\n```"
 		}
+	case "image":
+		size, err := store.AssetSize(stored, block.Path)
+		if err != nil {
+			view.Error = err.Error()
+		} else if size > maxReviewImageBytes {
+			view.Error = "Review image exceeds the 20 MB display limit"
+		}
 	}
 	return view
 }
 
+// requestedDiffContext normalizes untrusted query input to fixed 100-line batches.
+func requestedDiffContext(r *http.Request) int {
+	requested, err := strconv.Atoi(r.URL.Query().Get("context"))
+	if err != nil || requested <= defaultDiffContext {
+		return defaultDiffContext
+	}
+	requested = defaultDiffContext + ((requested-defaultDiffContext)/diffContextBatch)*diffContextBatch
+	return min(requested, maxDiffContext)
+}
+
+// nextDiffContext advances one bounded 100-line expansion batch.
+func nextDiffContext(current int) int {
+	return min(max(current, defaultDiffContext)+diffContextBatch, maxDiffContext)
+}
+
 // buildThreadViews filters one discussion to a block and prepares stable UI references.
 func buildThreadViews(basePath, reviewID, blockID, reviewerName string, discussion *artifact.Discussion, focusedThreadID, focusedCommentID string) ([]ThreadView, string) {
+	return buildThreadViewsForBlocks(basePath, reviewID, map[string]bool{blockID: true}, reviewerName, discussion, focusedThreadID, focusedCommentID)
+}
+
+// buildThreadViewsForBlocks combines discussions from several evidence blocks into one view.
+func buildThreadViewsForBlocks(basePath, reviewID string, blockIDs map[string]bool, reviewerName string, discussion *artifact.Discussion, focusedThreadID, focusedCommentID string) ([]ThreadView, string) {
 	views := []ThreadView{}
 	anchors := []map[string]any{}
 	for _, thread := range discussion.Threads {
-		if thread.Target.BlockID != blockID {
+		if !blockIDs[thread.Target.BlockID] {
 			continue
 		}
 		view := buildThreadView(basePath, reviewID, reviewerName, thread, focusedThreadID, focusedCommentID)
@@ -971,6 +1408,8 @@ func blockLabel(block artifact.Block) string {
 		return block.Path
 	case "diagram":
 		return "Diagram · " + strings.TrimPrefix(block.Path, "diagrams/")
+	case "image":
+		return "Image · " + strings.TrimPrefix(block.Path, "assets/")
 	case "callout":
 		return humanize(block.Kind)
 	case "question":
@@ -1016,8 +1455,7 @@ func repositoryScopeFromRequest(r *http.Request) repositoryScope {
 
 // repositoryKey derives a short stable identifier without exposing the absolute path.
 func repositoryKey(repository *gitrepo.Repository) string {
-	digest := sha256.Sum256([]byte(repository.Root()))
-	return fmt.Sprintf("%x", digest[:8])
+	return patchsettings.RepositoryKey(repository.Root())
 }
 
 // validRepositoryKey accepts the lowercase hexadecimal keys generated by repositoryKey.
@@ -1185,6 +1623,8 @@ func (a *App) requireRepository(w http.ResponseWriter, r *http.Request) (*gitrep
 
 // render writes a complete HTML page and converts template failures to HTTP errors.
 func (a *App) render(w http.ResponseWriter, name string, page Page, status int) {
+	page = pageWithNavigation(name, page)
+	page.SpeechAvailable = a.speech != nil
 	var buffer bytes.Buffer
 	if err := a.templates[name].ExecuteTemplate(&buffer, "layout", page); err != nil {
 		a.logger.Error("render page", "page", name, "error", err)
@@ -1194,6 +1634,30 @@ func (a *App) render(w http.ResponseWriter, name string, page Page, status int) 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = buffer.WriteTo(w)
+}
+
+// pageWithNavigation derives safe top-bar destinations from the rendered resource hierarchy.
+func pageWithNavigation(name string, page Page) Page {
+	if page.RepositoryName == "" || page.BasePath == "" {
+		return page
+	}
+	if name != "new" {
+		page.NewReviewPath = page.BasePath + "/reviews/new"
+	}
+	switch name {
+	case "home":
+		if page.Repository != nil {
+			page.BackPath, page.BackLabel = "/", "All repositories"
+		}
+	case "new", "overview":
+		page.BackPath, page.BackLabel = page.BasePath, "Repository overview"
+	case "chapter", "files", "discussions":
+		if page.ReviewNavigation != nil {
+			page.BackPath, page.BackLabel = page.ReviewNavigation.ReviewPath, "Review overview"
+			page.ReviewHomePath = page.ReviewNavigation.ReviewPath
+		}
+	}
+	return page
 }
 
 // renderPartial writes a named fragment for progressive Turbo updates.
@@ -1224,7 +1688,7 @@ func (a *App) renderTurboStream(w http.ResponseWriter, templateName string, valu
 
 // securityHeaders sets the browser policy for embedded local assets and scripts.
 func (a *App) securityHeaders(w http.ResponseWriter) {
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 }
@@ -1267,6 +1731,12 @@ func matchPath(path, prefix, separator string) bool {
 func matchActionPath(path, resource, action string) bool {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	return len(parts) == 5 && parts[0] == "reviews" && parts[2] == resource && parts[4] == action
+}
+
+// matchViewedPath recognizes the compact personal-progress mutation route.
+func matchViewedPath(requestPath string) bool {
+	parts := strings.Split(strings.Trim(requestPath, "/"), "/")
+	return len(parts) == 3 && parts[0] == "reviews" && parts[1] != "" && parts[2] == "viewed"
 }
 
 // parseOptionalLine accepts an absent line or one positive decimal line number.

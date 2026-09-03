@@ -41,8 +41,9 @@ Write the overview for a capable reviewer who has no author context. Include:
    compatibility, operations, or migration behavior.
 6. **Evidence:** relevant tests, checks, benchmarks, screenshots, or manual
    verification.
-7. **Uncertainty:** known tradeoffs, assumptions, and questions that need human
-   confirmation.
+7. **Uncertainty:** known tradeoffs, assumptions, limitations, and residual
+   risks. Resolve product, architecture, and implementation decisions during
+   development rather than deferring them into the review.
 8. **Reading path:** why the proposed chapter order is the fastest route to
    understanding.
 
@@ -66,10 +67,12 @@ behavior. Keep a migration or compatibility layer early when every later
 chapter depends on understanding it. Never force a change into this sequence
 when another order teaches it more clearly.
 
-Each chapter must answer one review question and have a rationale for appearing
-at that point. Prefer several small, coherent chapters to one exhaustive chapter
-or one chapter per directory. Cover every changed file, but compress generated,
-vendored, or repetitive evidence instead of making it dominate the story.
+Each chapter needs a clear learning objective and a rationale for appearing at
+that point. Prefer several small, coherent chapters to one exhaustive chapter
+or one chapter per directory. Keep the changed-file inventory complete, but do
+not force every path into visible code or diff evidence. If any path is omitted
+from visible evidence, close with a compact coverage chapter that names it and
+explains why it was omitted.
 
 Treat commit history as a clue, not as the table of contents. Coherent commits
 can reveal intent or separate a mechanical refactor from behavior, but Patchflow
@@ -77,9 +80,17 @@ reviews the final base-to-target change and must still make sense after squash o
 rebase. If the diff contains several unrelated conceptual changes, call that out
 as a scope risk instead of inventing a narrative that hides the review cost.
 
+Build the journey through progressive disclosure: establish purpose, outcome,
+system boundaries, and the main architectural approach first; then move through
+contracts and primary flows before zooming into non-obvious implementation
+details. Size the journey by conceptual complexity, novelty, and risk rather
+than lines or files changed. Its goal is a navigable mental model, not exhaustive
+line-by-line knowledge.
+
 Represent that behavior directly in the artifact when it adds signal:
 
-- `review_question` gives the chapter one decision target;
+- `review_question` may focus verification, but must not defer an unresolved
+  development decision into Patchflow;
 - `attention` names the kind of judgment required;
 - a final `takeaway` block states the addressable mental model that closes the
   chapter; and
@@ -101,17 +112,27 @@ Build chapters as claim-and-evidence sequences:
    obscures the relevant decision.
 4. Follow evidence with a `callout` when a consequence, risk, assumption, or
    tradeoff deserves explicit attention.
-5. Use `question` only for a concrete unresolved decision that a human can
-   answer.
+5. Do not use `question` to solicit a product, architecture, or implementation
+   decision. Resolve that choice during development, then explain the selected
+   option and rationale with prose or a callout.
 6. Use `diagram` when relationships, ownership, or sequence are materially
    clearer visually than in prose.
-7. Close with `takeaway` when the reviewer needs an explicit mental model before
+7. Use `image` when a screenshot or rendered result is itself review evidence;
+   its caption should direct attention rather than merely repeat its alt text.
+8. Close with `takeaway` when the reviewer needs an explicit mental model before
    moving to the next chapter.
 
 Not every sequence needs every block type. Avoid decorative diagrams, repeated
 introductions, prose that translates syntax, and large excerpts without a stated
 review purpose. Put tests close to the behavior they prove instead of collecting
 them mechanically at the end.
+
+Not every changed file needs visible evidence. Keep `change.files` and step
+`files` metadata complete for Git-native traceability, but omit code and diff
+blocks that add no new understanding. When omissions exist, the final
+`scope-and-coverage` chapter must list each omitted path and a specific reason;
+large mechanical groups may use an exact path pattern and count. Do not add an
+empty coverage chapter when the visible journey already represents every path.
 
 ## Stable block references
 

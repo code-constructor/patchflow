@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/artifact"
 )
 
 type category struct {

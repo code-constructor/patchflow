@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/artifact"
 )
 
 // DiscussionService creates durable comment threads and replies for one store.

@@ -89,3 +89,18 @@ bin/patchflow resolve --repository /path/to/repository \
 Pass `--reopen` to `resolve` to reopen a thread. `patchflow show` accepts copied
 block, thread, and comment paths and emits YAML by default or JSON with
 `--format json`.
+
+## Stale reviews and carry-forward
+
+Discussion belongs to exactly one review ID. When that review becomes stale,
+its `comments.yaml` remains readable beside the immutable source evidence; a
+new review starts with no discussion. Patchflow does not copy threads
+automatically because block IDs may have changed and code targets include the
+old commit SHA and line range.
+
+The repository dashboard keeps stale reviews in a secondary history section
+and surfaces their unresolved-thread count. A future or manual carry-forward
+must be explicit: inspect the old thread, verify that the concern still applies,
+map it to a block or source range in the new review, and create a new thread
+with a new ID. Never mutate the old thread's commit SHA to make it appear to
+belong to newer evidence.

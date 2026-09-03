@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/artifact"
 	yaml "go.yaml.in/yaml/v3"
 )
 
@@ -289,27 +289,50 @@ func (s *Store) ReadOverview(stored *Stored) (string, error) {
 
 // ReadAsset safely reads a regular file located inside one review directory.
 func (s *Store) ReadAsset(stored *Stored, relative string) (string, error) {
+	content, err := s.ReadAssetBytes(stored, relative)
+	return string(content), err
+}
+
+// ReadAssetBytes safely reads a binary or text file inside one review directory.
+func (s *Store) ReadAssetBytes(stored *Stored, relative string) ([]byte, error) {
+	realPath, _, err := s.assetFile(stored, relative)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(realPath)
+}
+
+// AssetSize returns a safe regular review asset's byte size without loading it.
+func (s *Store) AssetSize(stored *Stored, relative string) (int64, error) {
+	_, info, err := s.assetFile(stored, relative)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
+// assetFile resolves and validates one regular asset beneath its review directory.
+func (s *Store) assetFile(stored *Stored, relative string) (string, os.FileInfo, error) {
 	directory, err := s.safeReviewDirectory(stored.Review.ID, false)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if relative == "" || filepath.IsAbs(relative) || filepath.ToSlash(filepath.Clean(relative)) != relative || strings.Contains("/"+relative+"/", "/../") {
-		return "", &UnsafePathError{Message: "Review asset path is unsafe"}
+		return "", nil, &UnsafePathError{Message: "Review asset path is unsafe"}
 	}
 	candidate := filepath.Join(directory, filepath.FromSlash(relative))
 	realPath, err := filepath.EvalSymlinks(candidate)
 	if err != nil {
-		return "", &NotFoundError{Message: "Review asset does not exist"}
+		return "", nil, &NotFoundError{Message: "Review asset does not exist"}
 	}
 	if !inside(directory, realPath) {
-		return "", &UnsafePathError{Message: "Review asset escapes its artifact directory"}
+		return "", nil, &UnsafePathError{Message: "Review asset escapes its artifact directory"}
 	}
 	info, err := os.Stat(realPath)
 	if err != nil || !info.Mode().IsRegular() {
-		return "", &NotFoundError{Message: "Review asset does not exist"}
+		return "", nil, &NotFoundError{Message: "Review asset does not exist"}
 	}
-	content, err := os.ReadFile(realPath)
-	return string(content), err
+	return realPath, info, nil
 }
 
 // safeReviewDirectory resolves one validated review ID beneath the artifact root.

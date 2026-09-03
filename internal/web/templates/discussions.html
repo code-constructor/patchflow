@@ -1,0 +1,12 @@
+{{define "content"}}
+<section class="row row--between discussions-heading"><div><div class="eyebrow">Review conversation</div><h2>Discussions</h2><p class="lede">Every annotation across the review plan, kept in its narrative context.</p></div><span class="status">{{.Discussions.ThreadLabel}}</span></section>
+{{if .Discussions.Chapters}}<div class="discussion-index section">{{range .Discussions.Chapters}}
+  <section class="discussion-chapter-group">
+    <header class="discussion-chapter-group__header"><div><div class="eyebrow">Review chapter</div><h3>{{.Title}}</h3></div><div><span class="small muted">{{.ThreadLabel}}</span><a href="{{.URL}}" class="button button--quiet button--small">Open chapter →</a></div></header>
+    <div class="discussion-block-list">{{range .Blocks}}<article class="card discussion-block-group" id="discussion-block-{{.ID}}">
+      <header class="discussion-block-group__header"><div><span class="chapter-rail__type">{{.Type}}</span><h4>{{.Label}}</h4>{{if and .Path (ne .Path .Label)}}<p class="small muted">{{.Path}}</p>{{end}}</div><div><span class="small muted">{{.ThreadLabel}}</span><a href="{{.URL}}" class="button button--quiet button--small">Open block →</a></div></header>
+      <div class="thread-list discussion-thread-list" data-thread-list-for="{{.ID}}">{{range .Threads}}{{template "thread" .}}{{end}}</div>
+    </article>{{end}}</div>
+  </section>
+{{end}}</div>{{else}}<section class="card discussion-empty section"><div class="eyebrow">No discussions yet</div><h2>The review has no annotations.</h2><p class="muted">Start a discussion from any narrative or code block in the review plan.</p><a href="{{.ReviewNavigation.PlanPath}}" class="button">Open review plan</a></section>{{end}}
+{{end}}

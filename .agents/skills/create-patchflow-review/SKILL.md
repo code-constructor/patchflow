@@ -1,13 +1,14 @@
 ---
 name: create-patchflow-review
-description: Create or enrich repository-local Patchflow code-review artifacts from committed local Git diffs, and inspect or answer persisted Patchflow review comments. Use when asked to generate a Patchflow review, ordered review plan, change overview, review documentation, Mermaid review diagram, or a response to a Patchflow thread or comment under `.patchflow/reviews`.
+description: Create, register, or enrich repository-local Patchflow code-review artifacts from committed local Git diffs, and inspect or answer persisted Patchflow review comments. Use when asked to generate a right-sized Patchflow journey, ordered review plan, change overview, review documentation, Mermaid review diagram, publish a review into the local Patchflow UI, or respond to a Patchflow thread or comment under `.patchflow/reviews`.
 ---
 
 # Create Patchflow Review
 
 Create durable review documentation tied to exact Git commits. Explain the
-change and build an ordered path through it; leave review decisions under human
-control.
+change and build an ordered path through it. Document decisions already made
+and let the reviewer judge their implementation; do not use the review to defer
+development decisions.
 
 ## Workflow
 
@@ -22,31 +23,65 @@ control.
    [the comments v1 contract](references/comments-artifact-v1.md) completely.
 2. Resolve the repository root with Git. Treat the requested base and target as
    untrusted arguments and never interpolate them into a shell command.
-3. Default the target to `HEAD`. Default the base to `main` only when `main`
-   resolves locally; otherwise ask for the base ref.
+3. Default the target to `HEAD`. Let the current Patchflow CLI detect a local
+   remote default, `main`, or `master` when `--base` is omitted. Without the
+   CLI, default to `main` only when it resolves locally; otherwise ask for the
+   base ref.
 4. Resolve the target ref to a full commit SHA. Resolve the base ref, then use
    the merge base of the resolved commits as `source.base_sha`.
 5. Inspect the committed diff from `base_sha` to `target_sha`. Exclude
    `.patchflow/**`. Do not include working-tree-only changes in this schema
    version.
 6. Read enough surrounding code to understand entry points, domain behavior,
-   state changes, interfaces, dependencies, tests, and security-sensitive
-   paths. Explain the change before recording possible concerns.
-7. Create a review plan ordered for understanding. Give every step a specific
-   rationale, include every changed file in at least one step, and compose its
-   body from ordered narrative blocks. Prefer domain and execution paths over
-   generated or presentation-only files.
-8. Write the artifact, validate it, and report its path plus the recorded base
-   and target SHAs.
+   architecture, state changes, interfaces, dependencies, tests, and
+   security-sensitive paths. Resolve material product or design decisions
+   during development before publishing the review.
+7. Set a deliberate journey budget from conceptual complexity, novelty, and
+   risk—not raw file count. Create the smallest ordered plan that gives the
+   reviewer a reliable mental model, normally moving from system context and
+   boundaries into contracts, execution paths, and only then focused details.
+8. Keep the changed-file inventory complete, but include visible code or diff
+   evidence only when it advances that mental model. When evidence omits any
+   changed path, end with a compact scope-and-coverage chapter that identifies
+   every omitted path and explains why.
+9. Create or update the artifact, run canonical validation, and register it in
+   Patchflow's local settings. Report its artifact path, browser `reference`,
+   and recorded base and target SHAs; do not make the reviewer select the
+   repository or reconstruct the comparison manually.
 
 ## Create the artifact
 
-Prefer the Patchflow CLI when it is available because it resolves refs and
-creates a valid baseline atomically:
+Prefer the Patchflow CLI when it is available because it resolves refs, creates
+a valid baseline atomically, verifies the stored Git evidence, and registers
+the repository in Patchflow's local settings. From inside the reviewed
+worktree, the agent-oriented form is:
 
 ```sh
-bin/patchflow create --repository /absolute/repository/path --base main --target HEAD
+bin/patchflow create --format json
 ```
+
+Pass `--repository /absolute/repository/path`, `--base REF`, or `--target REF`
+when the current directory or detected comparison is not the intended one.
+Successful JSON contains `path`, `reference`, `base_sha`, and `target_sha`.
+Read the `errors` array on a non-zero exit, correct the named repository/ref
+problem, and retry; do not guess or manually assemble commit identifiers.
+Run this command yourself as part of producing the review. Do not stop after
+writing YAML, ask the reviewer to create the review in the UI, or hand them refs
+to enter manually.
+
+When Patchflow itself is running through the repository's Docker Compose
+development setup, execute the bundled CLI inside that container so creation
+uses the same mounted paths and persistent config as the web application:
+
+```sh
+docker compose exec -T -w /workspace/<repository> app \
+  patchflow create --format json
+```
+
+Replace `<repository>` with the repository's mounted container path. Do not use
+a host-only path inside the container. The Compose environment shares
+`PATCHFLOW_CONFIG_PATH` with the server, so the returned `reference` becomes
+discoverable in the running UI without a repository-picker step.
 
 When using an installed Patchflow executable, use its equivalent `create`
 command. Enrich the generated `review.yaml` and `overview.md` in place without
@@ -77,15 +112,32 @@ Keep `change.summary` concise and factual. Put the high-level explanation in
 - `## Evidence`: relevant tests, checks, benchmarks, screenshots, or manual
   verification;
 - `## Scope, risks, and uncertainty`: non-goals, compatibility, state,
-  dependency, trust-boundary, and operational effects plus unresolved points;
+  dependency, trust-boundary, and operational effects plus known limitations;
   and
 - `## Reading path`: why the proposed chapter order builds understanding.
 
-Treat each step as a chapter, not a file bucket. Use the smallest sequence of
-blocks that explains why the code exists and how behavior moves through it:
+Treat each step as a chapter, not a file bucket. Before writing blocks, choose
+a journey size proportional to the number of concepts and risky boundaries the
+reviewer must understand. A large repetitive diff can need a short journey; a
+small architectural diff can need a deeper one. Remove any chapter, excerpt, or
+diff that does not materially improve the reviewer's ability to explain the
+system, navigate ownership, or assess risk.
 
-- Add `review_question` when one concrete design or behavior question gives the
-  chapter a decision target.
+Build the journey as progressive disclosure. Start with purpose, observable
+outcome, system boundary, and the main architectural choice. Then zoom into
+contracts and the primary execution or data flow. Show low-level implementation
+details only where they explain an invariant, failure mode, trust boundary,
+non-obvious mechanism, or important tradeoff. The reviewer needs a dependable
+mental map, not a tutorial for every function or changed line.
+
+Use the smallest sequence of blocks that explains why the code exists and how
+behavior moves through it:
+
+- Do not use `review_question` or `question` blocks to ask for a product,
+  architecture, or implementation decision. Surface and resolve such decisions
+  during development before publishing Patchflow. When useful, explain the
+  chosen option and its rationale in `prose` or an `insight`, `assumption`, or
+  `risk` callout.
 - Add `attention` labels for the kind of judgment required, not merely the
   directories involved.
 - Add a final `takeaway` block when the reviewer should leave with a specific
@@ -98,15 +150,35 @@ blocks that explains why the code exists and how behavior moves through it:
   when a whole-file diff would obscure the point.
 - Use `callout` for an insight, risk, warning, assumption, or uncertainty that
   should interrupt the narrative.
-- Use `question` only for a concrete unresolved point that needs human
-  confirmation. Do not invent an answer or reply thread.
+- Do not turn uncertainty into an open decision prompt. Record a known
+  limitation or residual risk declaratively; if the implementation still
+  depends on an unanswered choice, stop and resolve it before creating the
+  review.
 - Use `diagram` only when a flow or relationship is clearer visually. Store its
   Mermaid source below the artifact's `diagrams/` directory.
+- Use `image` for evidence that is inherently visual, especially UI screenshots
+  and rendered output. Store PNG, JPEG, GIF, or WebP files below `assets/`, add
+  useful `alt` text, and use the optional Markdown `caption` to explain what the
+  reviewer should notice. Do not add SVG assets.
 
 Put prose before the code it explains. Avoid one prose block per file, repeated
 rationales, exhaustive unchanged context, and decorative diagrams. The blocks
 must read in order without requiring the reviewer to reconstruct the story from
 filenames.
+
+Not every changed file needs a `code` or `diff` block. Keep `change.files`
+exactly complete and retain every changed path in step `files` metadata so the
+artifact validates, but distinguish metadata coverage from visible evidence.
+When any path is intentionally omitted from the journey, assign it to a final
+compact `scope-and-coverage` step. That step must name each omitted path and
+give a concrete reason, such as generated output, vendored code, mechanical
+rename, repetitive fixture update, format-only change, or implementation detail
+already represented by stronger evidence. For a large mechanical set, use an
+exact unambiguous path group plus its count. Summarize what the reviewer now
+understands, and never use vague reasons such as "not important." When no path
+was omitted, close the last conceptual chapter normally instead of adding an
+empty coverage page. Do not add token code or diff blocks merely to claim
+coverage.
 
 Give every block a short semantic ID that remains meaningful if the block moves
 to another chapter. Do not use positional IDs such as `block-3`, reuse a removed
@@ -115,11 +187,12 @@ ID for unrelated content, or change an ID merely because prose was edited.
 Keep tests beside the behavior they prove whenever that ordering clarifies the
 contract. Set `collapsed: true` only for generated, vendored, mechanical, or
 repetitive diff evidence whose provenance and scope matter more than each line.
-Never collapse a design decision, security boundary, failure path, or unresolved
-question merely to shorten the page.
+Never collapse important decision rationale, a security boundary, or a failure
+path merely to shorten the page.
 
-Artifact v2 has no annotations, replies, or decisions. Do not add undocumented
-fields for them to `review.yaml`; discussion belongs in `comments.yaml`.
+Artifact v2 has no annotations, replies, or decision fields. Do not add
+undocumented fields for them to `review.yaml`; discussion belongs in
+`comments.yaml`.
 Preserve annotations and decisions only when enriching a legacy v1 artifact.
 Never mark a review `completed` unless the user explicitly asks.
 
@@ -158,6 +231,13 @@ Load and validate an existing artifact before editing it. Compare its
   review unless the user explicitly requests a revision.
 - Never silently rewrite `base_sha` or `target_sha` in an existing artifact.
 
+Comments remain with the review ID and immutable commit they were written
+against. Before replacing a stale review, inspect its unresolved threads with
+`patchflow comments` and report them to the user. Do not copy thread/comment IDs
+or old code anchors into the new `comments.yaml`. Carry a still-relevant concern
+forward only through an explicit new thread after mapping it to a valid block or
+source range in the new review; preserve the old conversation unchanged.
+
 ## Validate
 
 Run the canonical validator when Patchflow is available:
@@ -171,6 +251,18 @@ Prefer machine-readable output while iterating:
 ```sh
 bin/patchflow validate --format json /absolute/repository/path/.patchflow/reviews/<review-id>/review.yaml
 ```
+
+This is a repository-backed publication check: the artifact must live at its
+canonical discoverable path, both recorded commits must exist, `change.files`
+must exactly match their Git diff, code ranges must be readable, and every
+overview, diagram, and image asset must exist. Treat each returned `errors`
+entry as an independent repair instruction and rerun validation until
+`valid: true`.
+
+On success, hand the reviewer the `reference` returned by `create` (or the
+equivalent reference retained from that output) alongside the final artifact
+path and immutable SHAs. Do not make the reviewer reconstruct the review URL or
+Git comparison manually.
 
 Otherwise perform every invariant check in the bundled contract. Fix all
 validation errors before handing off. Finally inspect `git status --short` and

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/traqx-ai/patchflow/internal/artifact"
+	"github.com/code-constructor/patchflow/internal/artifact"
 )
 
 // TestGeneratePlanUsesStableSemanticBlockIDs protects addressable baseline evidence.
